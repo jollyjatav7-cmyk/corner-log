@@ -1,7 +1,7 @@
 /* 角球事件記錄：離線快取
    第一次聯網打開時把檔案存到裝置上；之後優先用本機檔案（離線也能開），
    有網路時在背景取得新版，下次打開就是新版。換了圖示等檔案時把版本號加 1。 */
-const CACHE = 'corner-log-v1';
+const CACHE = 'corner-log-v2';
 const ASSETS = ['./', './index.html', './manifest.webmanifest', './icon-180.png', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
