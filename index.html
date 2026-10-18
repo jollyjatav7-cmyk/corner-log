@@ -722,7 +722,7 @@ function renderHeader(){
   const c = counts(M);
   $('#gs0').textContent = c.go[0]; $('#gs1').textContent = c.go[1];
   $('#cn0').textContent = `角球 ${c.co[0]}`; $('#cn1').textContent = `角球 ${c.co[1]}`;
-  $('#mDate').textContent = M.d + (M.st === 2 ? ' · 已結束' : '');
+  $('#mDate').textContent = M.d + (M.st === 2 ? ' · 已結束' : '') + (OFF_TEXT[offState] ? ' · ' + OFF_TEXT[offState] : '');
   perBtn.textContent = PER[M.tm.p][2];
   runBtn.innerHTML = M.tm.r ? PAUSE : PLAY;
   runBtn.setAttribute('aria-label', M.tm.r ? '暫停計時' : '開始計時');
@@ -1243,7 +1243,8 @@ function renderSheet(){
         <div class="menu"><button data-a="m-list">事件列表<span>${M.events.length} 筆</span></button><button data-a="m-arch">倉庫<span>${[...allMatches.values()].filter(o => (o.ev && o.ev.length) || o.h || o.a).length} 場</span></button>
         <button data-a="m-clock">比賽時間<span>${PER[M.tm.p][2]} ${fmtClock(M.tm.p, clockOf(M))}</span></button>
         ${M.st === 2 ? '<button data-a="reopen">重新設為進行中<span>已結束</span></button>' : '<button data-a="m-end">結束比賽<span>填最終比分與角球</span></button>'}
-        <button data-a="m-new">新比賽<span>目前這場會留在倉庫</span></button></div>`;
+        <button data-a="m-new">新比賽<span>目前這場會留在倉庫</span></button></div>`
+        + (offState !== 'none' ? `<p class="hint" style="margin:0">離線使用：${offState === 'ready' ? '已準備好，沒有網路也能從主畫面打開。' : offState === 'unsupported' ? '目前無法離線。請用 Safari 打開安裝連結，加入主畫面後再從主畫面打開。' : '還沒準備好。請保持聯網，從主畫面圖示打開並停留幾秒，看到日期旁顯示「可離線使用」就完成了。'}</p>` : '');
       break;
     case 'clock': {
       const p = M.tm.p, c = Math.round(clockOf(M));
@@ -1514,6 +1515,28 @@ setInterval(() => {
   if (M.tm.r && Date.now() - lastFull > 5000 && !tg.pts.size && !tg.inert){ lastFull = Date.now(); renderTimeline(); renderStats(); }
 }, 250);
 
+/* ================= 13b. 離線狀態（只在正式 App 顯示） ================= */
+const IS_APP = !!document.querySelector('link[rel="manifest"]');
+const OFF_TEXT = { checking: '檢查離線中…', pending: '正在準備離線…', ready: '可離線使用', unsupported: '目前無法離線' };
+let offState = IS_APP ? 'checking' : 'none', offWasPending = false;
+async function refreshOffline(){
+  if (!IS_APP) return;
+  const secure = location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+  let next;
+  if (!secure || !('serviceWorker' in navigator) || !window.caches) next = 'unsupported';
+  else {
+    let hit = null;
+    try { hit = await caches.match('./index.html'); } catch(e){}
+    next = hit ? 'ready' : 'pending';
+  }
+  if (next === 'pending') offWasPending = true;
+  if (next === 'ready' && offWasPending && offState !== 'ready') showToast('已可離線使用：之後沒有網路也能從主畫面打開');
+  if (next !== offState){ offState = next; renderHeader(); if (sheetKind === 'menu') renderSheet(); }
+}
+addEventListener('sw-ready', () => { refreshOffline(); setTimeout(refreshOffline, 1500); setTimeout(refreshOffline, 5000); });
+addEventListener('sw-failed', () => { refreshOffline(); });
+if ('serviceWorker' in navigator) navigator.serviceWorker.addEventListener('controllerchange', refreshOffline);
+
 /* ================= 14. 啟動 ================= */
 (async function boot(){
   renderAll();
@@ -1525,7 +1548,8 @@ setInterval(() => {
   if (!o) o = [...allMatches.values()].filter(x => x.st === 1).sort((a, b) => (b.u || 0) - (a.u || 0))[0];
   if (o) M = decMatch(o);
   renderAll(); syncWake();
-  if (/[?&]cmtest\b/.test(location.search)) window.__cl = { get M(){ return M; }, allMatches, heads: () => tlHeads, tv, encMatch, TREE_SER, walk };
+  refreshOffline();
+  if (/[?&]cmtest\b/.test(location.search)) window.__cl = { get M(){ return M; }, allMatches, heads: () => tlHeads, tv, encMatch, TREE_SER, walk, get offState(){ return offState; } };
 })();
 })();
 </script>
@@ -1533,7 +1557,11 @@ setInterval(() => {
 /* 主畫面 App：離線快取，以及在 Safari 裡提示「加入主畫面」 */
 (() => {
   const secure = location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
-  if ('serviceWorker' in navigator && secure) addEventListener('load', () => { navigator.serviceWorker.register('./sw.js').catch(() => {}); });
+  if ('serviceWorker' in navigator && secure){
+    navigator.serviceWorker.register('./sw.js')
+      .then(() => navigator.serviceWorker.ready)
+      .then(() => dispatchEvent(new Event('sw-ready')), () => dispatchEvent(new Event('sw-failed')));
+  }
   const hint = document.getElementById('installHint');
   let dismissed = false;
   try { dismissed = localStorage.getItem('corner-log-install-hint') === '1'; } catch(e){}
