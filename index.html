@@ -1,0 +1,1507 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="角球記錄">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="format-detection" content="telephone=no">
+<meta name="theme-color" content="#f3f5f4" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0d1110" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="apple-touch-icon" href="./icon-180.png">
+<link rel="icon" type="image/png" sizes="192x192" href="./icon-192.png">
+<title>角球事件記錄</title>
+<style>
+/* Layout: broadcast-style scoreboard on top → full-bleed timeline band framed by hairlines → home recorder | stats | away recorder, separated by hairlines instead of boxes. Phone: scoreboard + timeline stay pinned; recorder switches between teams. */
+:root{
+  color-scheme:light;
+  --bg:#f3f5f4; --raise:#ffffff; --tile:#e7ebe9; --tile2:#dfe4e1;
+  --ink:#121815; --ink2:#46514b; --muted:#78837d; --faint:#a9b2ad; --rule:#d9dfdc;
+  --home:#2356d4; --home-soft:#e2e9fb; --on-home:#ffffff;
+  --away:#d2462a; --away-soft:#fbe5df; --on-away:#ffffff;
+  --gold:#d9a000; --on-gold:#231900; --win:rgba(18,24,21,.06); --scrim:rgba(8,12,10,.42); --warn:#b3261e; --ok:#23784a;
+  --f-ui:-apple-system,BlinkMacSystemFont,"PingFang TC","Hiragino Sans TC","Noto Sans TC","Noto Sans CJK TC","Microsoft JhengHei",system-ui,sans-serif;
+  --f-map:"PingFang SC","Hiragino Sans GB","Noto Sans SC","Noto Sans CJK SC","Microsoft YaHei",system-ui,sans-serif;
+  --f-num:"Avenir Next Condensed","DIN Condensed","Roboto Condensed","Arial Narrow",-apple-system,system-ui,sans-serif;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  color-scheme:dark;
+  --bg:#0d1110; --raise:#171d1a; --tile:#1b2320; --tile2:#24302b;
+  --ink:#e7ede9; --ink2:#b3bdb7; --muted:#859089; --faint:#55615a; --rule:#252e2a;
+  --home:#7ea6ff; --home-soft:#1a2644; --on-home:#081123;
+  --away:#ff8a6b; --away-soft:#3a2018; --on-away:#200b05;
+  --gold:#f2b51c; --on-gold:#231900; --win:rgba(255,255,255,.06); --scrim:rgba(0,0,0,.6); --warn:#ff7166; --ok:#55bd80;
+}}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#0d1110; --raise:#171d1a; --tile:#1b2320; --tile2:#24302b;
+  --ink:#e7ede9; --ink2:#b3bdb7; --muted:#859089; --faint:#55615a; --rule:#252e2a;
+  --home:#7ea6ff; --home-soft:#1a2644; --on-home:#081123;
+  --away:#ff8a6b; --away-soft:#3a2018; --on-away:#200b05;
+  --gold:#f2b51c; --on-gold:#231900; --win:rgba(255,255,255,.06); --scrim:rgba(0,0,0,.6); --warn:#ff7166; --ok:#55bd80;
+}
+html{-webkit-text-size-adjust:100%}
+*,*::before,*::after{box-sizing:border-box}
+[hidden]{display:none!important}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 var(--f-ui);
+  padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);
+  padding-left:max(18px,env(safe-area-inset-left,0px));padding-right:max(18px,env(safe-area-inset-right,0px))}
+button,input,textarea{font:inherit;color:inherit}
+button{cursor:pointer;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
+:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+.app{max-width:1440px;margin:0 auto;padding-bottom:28px}
+.cap{font:600 11px/1 var(--f-ui);letter-spacing:.14em;color:var(--muted);margin:0}
+.ghost{height:34px;padding:0 10px;border:0;background:none;border-radius:9px;font:500 14px var(--f-ui);color:var(--ink2);display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.ghost:active{background:var(--tile)}
+.ghost.warn{color:var(--warn)}
+.pill{height:38px;padding:0 16px;border:0;border-radius:19px;background:var(--tile);font:600 14px var(--f-ui);color:var(--ink);display:inline-flex;align-items:center;justify-content:center;gap:6px;white-space:nowrap}
+.pill:active{background:var(--tile2)}
+.pill.dark{background:var(--ink);color:var(--bg)}
+.pill.danger{background:var(--warn);color:#fff}
+.pill:disabled{opacity:.45}
+.fi{height:42px;border:0;border-radius:11px;background:var(--tile);padding:0 12px;font-size:16px;min-width:0;width:100%;color:var(--ink)}
+.fi:focus{outline:2px solid var(--ink);outline-offset:0}
+
+/* ---------- scoreboard ---------- */
+.dock{background:var(--bg)}
+.top{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);grid-template-areas:"lg sb nav";align-items:center;gap:6px 18px;padding-block:14px 12px}
+.lgbox{grid-area:lg;min-width:0;display:grid;gap:2px}
+.lg{border:0;background:none;padding:2px 0;font:600 13px var(--f-ui);letter-spacing:.06em;color:var(--ink2);width:100%;max-width:240px;border-bottom:1px solid transparent}
+.lg::placeholder{color:var(--faint)}
+.lg:focus{outline:none;border-bottom-color:var(--ink)}
+.date{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.sb{grid-area:sb;display:grid;grid-template-columns:minmax(76px,190px) 44px auto 44px minmax(76px,190px);align-items:center;column-gap:12px}
+.sn{display:grid;gap:1px;min-width:0}
+.sn.h{justify-items:end;text-align:right}
+.tn{border:0;background:none;padding:1px 0;width:100%;min-width:0;font:700 21px/1.2 var(--f-ui);border-bottom:1.5px solid transparent}
+.tn::placeholder{color:var(--faint);font-weight:600}
+.tn:focus{outline:none;border-bottom-color:currentColor}
+.sn.h .tn{text-align:right;color:var(--home)} .sn.a .tn{color:var(--away)}
+.cn{font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+.gs{font:600 38px/1 var(--f-num);text-align:center;font-variant-numeric:tabular-nums}
+.gs.h{color:var(--home)} .gs.a{color:var(--away)}
+.clockb{display:grid;grid-template-columns:auto auto;align-items:center;justify-items:center;column-gap:10px;padding:0 6px}
+.per{grid-column:1/-1;border:0;background:none;padding:0 0 2px;font:600 10.5px/1 var(--f-ui);letter-spacing:.16em;color:var(--muted)}
+.clk{border:0;background:none;padding:0;font:600 38px/1 var(--f-num);font-variant-numeric:tabular-nums;letter-spacing:.01em;color:var(--ink);min-width:3.4em;text-align:center}
+.idle .clk{color:var(--muted)}
+.run{width:38px;height:38px;border-radius:50%;border:0;background:var(--ok);color:#fff;display:grid;place-items:center;padding:0}
+.run.on{background:var(--tile);color:var(--ink)}
+.run svg{width:13px;height:13px;fill:currentColor}
+.nav{grid-area:nav;justify-self:end;display:flex;align-items:center;gap:2px}
+.nav .more{font-size:18px;letter-spacing:.1em}
+.banner{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;padding:8px 0 10px;font-size:13px;color:var(--ink2);border-top:1px solid var(--rule)}
+.banner b{color:var(--ink)}
+.banner .sp{flex:1}
+
+/* ---------- timeline ---------- */
+.tl{border-top:1px solid var(--rule);border-bottom:1px solid var(--rule);padding-block:10px 4px;min-width:0}
+.tl-head{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px}
+.legend{display:flex;flex-wrap:wrap;gap:2px 12px;font-size:11.5px;color:var(--muted);flex:1 1 320px;min-width:0}
+.legend span{display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
+.legend svg{width:15px;height:15px;overflow:visible;flex:none}
+.legend .ld{flex-basis:100%;white-space:normal;color:var(--faint)}
+.tools{display:flex;align-items:center;gap:6px;margin-left:auto}
+.zoom{display:inline-flex;align-items:center;gap:0}
+.zb{min-width:34px;height:30px;border:0;background:none;border-radius:8px;font:500 17px/1 var(--f-ui);color:var(--ink2);padding:0 6px}
+.zb:active{background:var(--tile)}
+.zb.t{font-size:12.5px;font-weight:500}
+.zl{font-size:11.5px;color:var(--muted);min-width:7.5em;text-align:center;font-variant-numeric:tabular-nums;white-space:nowrap}
+.tog{display:inline-flex;gap:2px;background:var(--tile);border-radius:10px;padding:2px}
+.tog button{border:0;background:none;height:28px;padding:0 12px;border-radius:8px;font-size:12.5px;color:var(--ink2)}
+.tog button[aria-pressed="true"]{background:var(--raise);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.lgdbtn{display:none}
+.tl-wrap{position:relative;min-width:0;touch-action:pan-y;-webkit-user-select:none;user-select:none;cursor:grab;margin-top:4px}
+.tl-wrap.drag{cursor:grabbing}
+#tl{display:block;width:100%}
+#tl text{font-family:var(--f-ui)}
+#tl .hl{font-family:var(--f-map)}
+.ax{stroke:var(--faint);stroke-width:1.2}
+.ax.st2{stroke-dasharray:4 3}
+.gd{stroke:var(--rule);stroke-width:1}
+.mt{stroke:var(--faint);stroke-width:1}
+.tk{fill:var(--muted);font-size:10.5px;text-anchor:middle;font-variant-numeric:tabular-nums}
+.tk.ht{font-weight:700;letter-spacing:.08em}
+.sd{font-size:11px;font-weight:700;text-anchor:middle;dominant-baseline:middle}
+.sd.home{fill:var(--home)} .sd.away{fill:var(--away)}
+.wn{fill:var(--win)}
+.sg.home{fill:var(--home-soft)} .sg.away{fill:var(--away-soft)}
+.sgl{font-size:10.5px;font-weight:700}
+.sgl.home{fill:var(--home)} .sgl.away{fill:var(--away)}
+.mo.home{fill:var(--home);opacity:.13} .mo.away{fill:var(--away);opacity:.13}
+.sm{stroke-width:1.4;stroke-linecap:round}
+.sm.home{stroke:var(--home)} .sm.away{stroke:var(--away)}
+.sm.l0{stroke:var(--faint)} .sm.l1{opacity:.55} .sm.l2,.sm.l3,.sm.l4{stroke-width:2}
+.sm.q{stroke-dasharray:2 3}
+.hd.l0{fill:var(--bg);stroke:var(--faint);stroke-width:1.4}
+.hd.home.l1{fill:var(--home);opacity:.8} .hd.away.l1{fill:var(--away);opacity:.8}
+.hd.home.l2{fill:var(--home)} .hd.away.l2{fill:var(--away)}
+.hd.l2{stroke:var(--bg);stroke-width:1.2}
+.dt .hd.home.l1{fill:var(--home-soft);stroke:var(--home);stroke-width:1.4;opacity:1}
+.dt .hd.away.l1{fill:var(--away-soft);stroke:var(--away);stroke-width:1.4;opacity:1}
+.hl{font-size:10px;font-weight:700;text-anchor:middle}
+.hl.l0{fill:var(--muted)} .hl.home.l1{fill:var(--home)} .hl.away.l1{fill:var(--away)}
+.hl.home.l2{fill:var(--on-home)} .hl.away.l2{fill:var(--on-away)}
+.fl{fill:var(--gold);stroke-width:1.2;stroke-linejoin:round}
+.fl.home{stroke:var(--home)} .fl.away{stroke:var(--away)}
+.bl{fill:var(--bg);stroke:var(--ink);stroke-width:1.5} .bc{fill:var(--ink)}
+.nw{stroke:var(--ink);stroke-width:1.2;stroke-dasharray:3 3;opacity:.45}
+.em{fill:var(--muted);font-size:13px;text-anchor:middle}
+.cards{display:flex;gap:8px;overflow-x:auto;padding:10px 0 8px;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;scrollbar-width:thin}
+.ecard{flex:none;width:214px;text-align:left;border:0;border-radius:12px;background:var(--tile);padding:9px 12px;display:grid;gap:3px}
+.ecard .t1{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--ink2)}
+.ecard .t1 i{width:7px;height:7px;border-radius:50%;background:var(--home);flex:none}
+.ecard.s1 .t1 i{background:var(--away)}
+.ecard .t1 b{font-variant-numeric:tabular-nums;color:var(--ink)}
+.ecard .t1 .lvl{margin-left:auto}
+.ecard .t2{font:13px/1.35 var(--f-map);color:var(--ink)}
+.ecard .t3{font:12px/1.35 var(--f-map);color:var(--muted);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.cards .none{color:var(--muted);font-size:12.5px;padding:4px 0}
+
+/* level tags */
+.lvl{display:inline-flex;align-items:center;font:700 11.5px/1 var(--f-ui);padding:4px 8px;border-radius:10px;white-space:nowrap;background:var(--tile2);color:var(--ink2)}
+.lv0{background:transparent;color:var(--muted);box-shadow:inset 0 0 0 1px var(--rule)}
+.s0 .lv1,.home .lv1{background:var(--home-soft);color:var(--home)} .s1 .lv1,.away .lv1{background:var(--away-soft);color:var(--away)}
+.s0 .lv2,.home .lv2{background:var(--home);color:var(--on-home)} .s1 .lv2,.away .lv2{background:var(--away);color:var(--on-away)}
+.lv3{background:var(--gold);color:var(--on-gold)}
+.lv4{background:var(--ink);color:var(--bg)}
+
+/* ---------- work area ---------- */
+.rtabs{display:none}
+.work{display:grid;grid-template-columns:minmax(0,1fr) 284px minmax(0,1fr);align-items:start}
+.rec{min-width:0;padding:14px 22px 10px 0}
+.rec.away{padding:14px 0 10px 22px}
+.stats{min-width:0;padding:14px 22px 10px;border-left:1px solid var(--rule);border-right:1px solid var(--rule)}
+.rec-head{display:flex;align-items:center;gap:8px;min-width:0}
+.rec-head i{width:9px;height:9px;border-radius:50%;background:var(--home);flex:none}
+.rec.away .rec-head i{background:var(--away)}
+.rec-head b{font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.rec-head span{color:var(--muted);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.rec-head em{margin-left:auto;font-style:normal;color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.trail{display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;margin-top:12px;font:13px/1.4 var(--f-map);color:var(--ink2)}
+.trail .sep{color:var(--faint)}
+.trail .cu{font-style:italic}
+.tchip{border:0;border-radius:11px;padding:3px 9px;font:700 12.5px/1.2 var(--f-ui);font-variant-numeric:tabular-nums;background:var(--home);color:var(--on-home)}
+.away .tchip{background:var(--away);color:var(--on-away)}
+.tadj{display:flex;flex-wrap:wrap;gap:4px;margin-top:8px}
+.tadj .ghost{height:30px;font-size:13px;background:var(--tile)}
+.qt{font:700 18px/1.35 var(--f-map);margin-top:14px;letter-spacing:.01em}
+.qs{font-size:12px;color:var(--muted);margin-top:2px}
+.opts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin-top:12px}
+.opt{min-height:54px;border:0;border-radius:13px;background:var(--tile);font:500 15px/1.3 var(--f-map);text-align:left;padding:8px 14px;display:flex;align-items:center;gap:8px;min-width:0;color:var(--ink)}
+.home .opt:active{background:var(--home-soft)} .away .opt:active{background:var(--away-soft)}
+.opt .go{margin-left:auto;color:var(--faint);font-size:18px;line-height:1}
+.opt .bd{margin-left:auto;font:700 11px/1 var(--f-ui);padding:4px 7px;border-radius:9px;white-space:nowrap}
+.bd.co{background:var(--gold);color:var(--on-gold)} .bd.gl{background:var(--ink);color:var(--bg)}
+.opt.ex{background:transparent;color:var(--muted);box-shadow:inset 0 0 0 1px var(--rule)}
+.opt .lvl{font-size:13.5px;padding:6px 10px}
+.quick{display:flex;flex-wrap:wrap;align-items:center;gap:2px 4px;margin-top:10px;font-size:12px;color:var(--muted)}
+.quick .ghost{height:30px;font-size:13px}
+.foot{display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin-top:14px}
+.foot .sp{flex:1}
+.submit{height:46px;padding:0 28px;border-radius:23px;border:0;font-size:16px;font-weight:700}
+.home .submit{background:var(--home);color:var(--on-home)} .away .submit{background:var(--away);color:var(--on-away)}
+.early{height:38px;padding:0 14px;border-radius:19px;border:0;background:var(--tile);font-weight:600;font-size:13.5px}
+.endv{display:grid;gap:10px;justify-items:start;margin-top:14px}
+.endv .lvl{font-size:15px;padding:8px 14px;border-radius:16px}
+.linkbtn{border:0;background:none;color:var(--muted);text-decoration:underline;text-underline-offset:3px;padding:0;font-size:12.5px}
+.txt{display:grid;gap:10px;margin-top:12px}
+.sugs{display:flex;flex-wrap:wrap;gap:6px}
+.sugs .ghost{height:30px;font-size:13px;font-family:var(--f-map);background:var(--tile)}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+
+/* ---------- stats ---------- */
+.st-top{display:flex;align-items:center;gap:8px}
+.st-top .sp{flex:1}
+.chips{display:flex;flex-wrap:wrap;gap:2px;margin-top:10px}
+.chip{height:28px;padding:0 10px;border:0;border-radius:14px;background:none;font-size:12.5px;color:var(--ink2)}
+.chip[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
+.st-h{display:grid;grid-template-columns:1fr auto 1fr;gap:6px;align-items:baseline;margin-top:14px;font-size:12.5px;font-weight:700}
+.st-h .h{color:var(--home);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.st-h .a{color:var(--away);text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.st-h .m{color:var(--muted);font-weight:500;font-size:11px}
+.secs{display:grid;gap:14px;margin-top:6px}
+.sec h3{margin:0;padding:8px 0 4px;border-bottom:1px solid var(--rule)}
+.srow{display:grid;grid-template-columns:52px 1fr 52px;align-items:center;gap:0 6px;padding:8px 0 6px}
+.srow .h,.srow .a{font:600 21px/1 var(--f-num);font-variant-numeric:tabular-nums}
+.srow .h{color:var(--home)} .srow .a{color:var(--away);text-align:right}
+.srow .lb{text-align:center;font-size:12.5px;color:var(--ink);line-height:1.25}
+.srow .lb small{display:block;font-size:10.5px;color:var(--faint)}
+.srow .bar{grid-column:1/-1;height:3px;border-radius:2px;display:flex;background:var(--tile);margin-top:7px;overflow:hidden}
+.srow .bar i{display:block;height:100%}
+.srow .bar .bh{background:var(--home);opacity:.7} .srow .bar .ba{background:var(--away);opacity:.7;margin-left:auto}
+.srow .note{grid-column:1/-1;margin:6px 0 0;font-size:11.5px;line-height:1.4;color:var(--muted);text-align:center}
+.st-foot{font-size:11.5px;color:var(--muted);margin-top:12px}
+
+/* ---------- sheets ---------- */
+.sheet{position:fixed;inset:0;z-index:50;background:var(--scrim);display:flex;align-items:flex-end;justify-content:center;
+  padding:max(16px,env(safe-area-inset-top,0px)) max(12px,env(safe-area-inset-right,0px)) 0 max(12px,env(safe-area-inset-left,0px))}
+.sheet-card{width:min(720px,100%);max-height:100%;overflow:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;background:var(--raise);border-radius:20px 20px 0 0;
+  padding:18px 18px calc(20px + env(safe-area-inset-bottom,0px));display:grid;gap:16px;align-content:start}
+@media (min-width:720px){.sheet{align-items:center;padding-bottom:16px}.sheet-card{border-radius:20px;max-height:calc(100vh - 32px)}}
+.sh-h{display:flex;align-items:center;gap:10px}
+.sh-h h3{margin:0;font-size:17px;flex:1;min-width:0}
+.lbl{font-size:12px;color:var(--muted);margin-bottom:8px}
+.hint{font-size:12.5px;color:var(--muted);margin:8px 0 0;line-height:1.5}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px}
+.big{height:50px;border-radius:25px;font-size:15px}
+.bigclk{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+.bigclk b{font:600 46px/1 var(--f-num);font-variant-numeric:tabular-nums}
+.bigclk span{font-weight:700} .bigclk em{font-style:normal;color:var(--muted);font-size:13px}
+.seg{display:flex;gap:2px;background:var(--tile);border-radius:12px;padding:3px}
+.seg button{flex:1;border:0;background:none;height:36px;border-radius:9px;font-size:13.5px;color:var(--ink2)}
+.seg button[aria-pressed="true"]{background:var(--raise);color:var(--ink);font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.adjrow{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.adjrow .ghost{background:var(--tile)}
+.adjrow .fi{width:110px;text-align:center;font-variant-numeric:tabular-nums;font-weight:700}
+.pathlist{margin:0;padding:0 0 0 20px;display:grid;gap:4px;font:14px/1.45 var(--f-map)}
+.pathlist .cu{font-style:italic}
+.meta{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.tagx{font-size:12px;color:var(--muted);border-radius:9px;padding:3px 8px;background:var(--tile)}
+.menu{display:grid;margin:0 -6px}
+.menu button{display:flex;align-items:center;justify-content:space-between;height:52px;border:0;background:none;padding:0 8px;font-size:16px;border-bottom:1px solid var(--rule);text-align:left;color:var(--ink)}
+.menu button:last-child{border-bottom:0}
+.menu button span{color:var(--muted);font-size:13px}
+.menu button.warn{color:var(--warn)}
+.elist h4{margin:14px 0 2px}
+.erow{display:grid;grid-template-columns:auto 58px 1fr auto;gap:10px;align-items:center;padding:10px 2px;border:0;border-bottom:1px solid var(--rule);width:100%;text-align:left;background:none;color:var(--ink)}
+.erow i{width:8px;height:8px;border-radius:50%;background:var(--home)}
+.erow.s1 i{background:var(--away)}
+.erow b{font-variant-numeric:tabular-nums}
+.erow .ep{font:13.5px/1.4 var(--f-map);min-width:0}
+.erow .ep small{display:block;color:var(--muted);font-size:12px}
+.mlist{display:grid}
+.mrow{padding:12px 0;border-bottom:1px solid var(--rule);display:grid;gap:6px}
+.mrow .t{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:baseline}
+.mrow .t b{font-size:15px}
+.mrow .s{font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+.badge{font-size:11px;font-weight:700;padding:2px 8px;border-radius:9px;background:var(--tile);color:var(--muted)}
+.badge.live{background:var(--ok);color:#fff}
+.stepper{display:grid;grid-template-columns:1fr auto 1fr;gap:10px;align-items:center}
+.stepper .side{display:flex;align-items:center;gap:8px}
+.stepper .side.a{justify-content:flex-end}
+.stepper .fi{width:64px;text-align:center;font-weight:700;font-size:18px}
+.stepper .nm{font-weight:700;font-size:13px;max-width:9em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.stepper .vs{color:var(--muted)}
+textarea.fi{height:180px;padding:12px;font:12.5px/1.5 ui-monospace,Menlo,monospace;resize:vertical}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(18px + env(safe-area-inset-bottom,0px));z-index:60;display:flex;align-items:center;gap:12px;
+  max-width:min(640px,calc(100% - 32px));padding:10px 10px 10px 16px;border-radius:14px;background:var(--ink);color:var(--bg);font-size:13.5px;box-shadow:0 10px 30px rgba(0,0,0,.22)}
+.toast span{flex:1;min-width:0;font-family:var(--f-map)}
+.toast button{flex:none;height:32px;border-radius:16px;border:0;background:var(--bg);color:var(--ink);font-weight:700;padding:0 14px}
+.install{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(16px + env(safe-area-inset-bottom,0px));z-index:45;display:flex;align-items:center;gap:12px;
+  width:min(560px,calc(100% - 32px));padding:10px 10px 10px 16px;border-radius:14px;background:var(--ink);color:var(--bg);font-size:13.5px;line-height:1.5}
+.install span{flex:1;min-width:0}
+.install button{flex:none;height:32px;border-radius:16px;border:0;background:var(--bg);color:var(--ink);font-weight:700;padding:0 14px}
+.vh{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+/* ---------- responsive ---------- */
+@media (max-width:1099px){
+  .work{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+  .stats{grid-column:1/-1;order:3;border:0;border-top:1px solid var(--rule);padding:14px 0 10px}
+  .secs{grid-template-columns:repeat(auto-fit,minmax(250px,1fr));column-gap:28px}
+  .sb{grid-template-columns:minmax(64px,160px) 36px auto 36px minmax(64px,160px);column-gap:10px}
+}
+@media (max-width:899px){
+  .top{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"lg nav" "sb sb";padding-block:10px 10px}
+  .sb{justify-self:center}
+}
+@media (max-width:719px){
+  body{padding-left:max(14px,env(safe-area-inset-left,0px));padding-right:max(14px,env(safe-area-inset-right,0px))}
+  .dock{position:sticky;top:-44px;z-index:20;margin:0 -14px;padding:0 14px;box-shadow:0 1px 0 var(--rule)}
+  .top{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"lg lg" "sb nav";padding-block:8px 6px;row-gap:6px;column-gap:4px;min-height:0}
+  .lgbox{height:34px;align-content:center}
+  .nav .wide{display:none}
+  .sb{width:100%;grid-template-columns:minmax(0,1fr) 28px auto 28px minmax(0,1fr);column-gap:6px}
+  .tn{font-size:16px}
+  .gs{font-size:28px}
+  .clk{font-size:28px}
+  .run{width:32px;height:32px}
+  .clockb{column-gap:6px;padding:0}
+  .tl{border:0;padding-block:4px 2px}
+  .banner{flex-wrap:nowrap;padding:4px 0 6px;font-size:12.5px}
+  .banner .bx,.banner .sp{display:none}
+  .banner b{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .banner .ghost{height:30px;font-size:13px;background:var(--tile)}
+  .legend{display:none;flex-basis:100%;order:3}
+  .legend.open{display:flex}
+  .lgdbtn{display:inline-flex}
+  .zl{display:none}
+  .cards{display:none}
+  .rtabs{display:flex;gap:2px;background:var(--tile);border-radius:12px;padding:3px;margin-top:12px}
+  .rtabs button{flex:1;min-width:0;height:38px;border:0;background:none;border-radius:9px;font-size:13.5px;font-weight:600;color:var(--ink2);display:inline-flex;align-items:center;justify-content:center;gap:6px}
+  .rtabs button i{width:8px;height:8px;border-radius:50%;flex:none}
+  .rtabs button span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .rtabs button em{font-style:normal;width:6px;height:6px;border-radius:50%;background:var(--gold);flex:none}
+  .rtabs button[aria-pressed="true"]{background:var(--raise);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.08)}
+  .work{grid-template-columns:minmax(0,1fr)}
+  .work .rec{padding:6px 0 10px}
+  .work[data-tab="0"] #rec1, .work[data-tab="1"] #rec0{display:none}
+  .stats{order:3}
+  .secs{grid-template-columns:minmax(0,1fr)}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="dock" id="dock">
+    <header class="top">
+      <div class="lgbox">
+        <input id="fLg" class="lg" placeholder="輸入聯賽" maxlength="24" autocomplete="off" aria-label="聯賽名稱">
+        <span class="date" id="mDate"></span>
+      </div>
+      <div class="sb">
+        <div class="sn h"><input id="fH" class="tn" placeholder="主隊" maxlength="20" autocomplete="off" aria-label="主隊名稱"><span class="cn" id="cn0">角球 0</span></div>
+        <span class="gs h" id="gs0" aria-label="主隊記錄到的進球">0</span>
+        <div class="clockb idle" id="clockBox">
+          <button class="per" id="perBtn" title="調整比賽時間">上半場</button>
+          <button class="clk" id="clk" title="調整比賽時間">00:00</button>
+          <button class="run" id="runBtn" aria-label="開始計時"></button>
+        </div>
+        <span class="gs a" id="gs1" aria-label="客隊記錄到的進球">0</span>
+        <div class="sn a"><input id="fA" class="tn" placeholder="客隊" maxlength="20" autocomplete="off" aria-label="客隊名稱"><span class="cn" id="cn1">角球 0</span></div>
+      </div>
+      <nav class="nav" aria-label="功能">
+        <button class="ghost wide" id="listBtn">事件</button>
+        <button class="ghost wide" id="archBtn">倉庫</button>
+        <button class="ghost more" id="menuBtn" aria-label="更多">⋯</button>
+      </nav>
+    </header>
+    <div class="banner" id="banner" hidden></div>
+    <section class="tl" aria-label="時間軸">
+      <div class="tl-head">
+        <p class="cap">時間軸</p>
+        <div class="legend" id="legend"></div>
+        <div class="tools">
+          <button class="zb t lgdbtn" id="lgdBtn">圖例</button>
+          <div class="zoom" role="group" aria-label="縮放">
+            <button class="zb" id="zOut" aria-label="縮小">−</button>
+            <span class="zl" id="zLabel">雙指可放大</span>
+            <button class="zb" id="zIn" aria-label="放大">＋</button>
+            <button class="zb t" id="zAll">全場</button>
+            <button class="zb t" id="zNow">現在</button>
+          </div>
+          <div class="tog" role="group" aria-label="時間軸樣式">
+            <button data-mode="simple" aria-pressed="true">簡易</button>
+            <button data-mode="detail" aria-pressed="false">詳細</button>
+          </div>
+        </div>
+      </div>
+      <div class="tl-wrap" id="tlWrap"><svg id="tl" role="img" aria-label="兩隊推進與威脅時間軸，主隊在上，客隊在下"></svg></div>
+      <div class="cards" id="cards" hidden></div>
+    </section>
+  </div>
+
+  <div class="rtabs" id="rtabs" role="group" aria-label="選擇哪一隊進攻"></div>
+  <div class="work" id="work" data-tab="0">
+    <section class="rec home" id="rec0" aria-label="主隊進攻記錄"></section>
+    <section class="stats" id="stats" aria-label="統計"></section>
+    <section class="rec away" id="rec1" aria-label="客隊進攻記錄"></section>
+  </div>
+</div>
+
+<div class="sheet" id="sheet" hidden><div class="sheet-card" id="sheetCard" role="dialog" aria-modal="true"></div></div>
+<div class="toast" id="toast" role="status" aria-live="polite" hidden><span id="toastMsg"></span><button id="toastUndo" hidden>復原</button></div>
+<div class="install" id="installHint" hidden><span>點 Safari 的「分享」→「加入主畫面」，之後就能從主畫面離線打開。</span><button id="installClose">知道了</button></div>
+<input type="file" id="fileIn" class="vh" accept=".json,application/json,text/plain" tabindex="-1" aria-hidden="true">
+
+<script>
+(() => {
+'use strict';
+
+/* ================= 1. 思維導圖（完整版，含圖中收起的部分） =================
+   打门(7)、直塞(9)、分边给边锋(113) 都已展開；數量與原圖一致。 */
+const TH = 1, SH = 2, CO = 4, GL = 8, FA = 16, OK = 32;
+const N = (label, kids, tag, q) => ({ label, kids: kids || null, tag: tag || 0, q: q || null });
+const SHOT_OUT = [N('进球', 0, GL), N('被扑住'), N('打偏'), N('被扑出底线（角球）', 0, CO),
+  N('被后卫挡住', [N('出底线（角球）', 0, CO), N('出非底线')])];
+const shot = label => N(label, SHOT_OUT, SH | TH);
+const TARGET = N('到达目标区域', [shot('产生射门'), N('被解围', [N('出底线（角球）', 0, CO), N('非底线')])]);
+const cross = label => N(label, [N('被挡出底线（角球）', 0, CO), N('被挡出非底线'), TARGET]);
+const THROUGH = [N('被断'), shot('接直塞球打门')];
+const noThreat = (a, b) => N('不造威胁', [N(a), N(b)]);
+const WING = [
+  noThreat('被断', '回传'),
+  N('造威胁', [
+    cross('下底传中'), cross('平齐n形传中'), cross('平齐u形传中'), cross('四十五度传中'),
+    N('下底突破', [N('被断球'), N('被挡出底线', 0, CO), N('成功突破', [
+      N('传球进球门前', [N('被挡出底线（角球）', 0, CO), N('被挡出非底线'), TARGET]),
+      shot('打门')])]),
+    N('内切突破', [N('被断'), N('突破后无空间回传'), N('突破成功', [shot('打门'), N('直塞', THROUGH)])])
+  ], TH)
+];
+const toWing = () => N('分边给边锋', WING);
+const BOX = [noThreat('被断', '回传'), N('造威胁', [shot('打门'), N('回传')], TH), toWing(), N('直塞', THROUGH)];
+const ARC = [noThreat('回传', '被断'), N('造威胁', [shot('打门')], TH), toWing(), N('直塞', THROUGH),
+  N('往里传高吊球', [N('到达禁区内', [noThreat('被断', '回传'), N('造威胁', [shot('打门'), toWing(), N('回传')], TH)])])];
+const LOCS = [N('边锋', WING), N('禁区内', BOX), N('弧顶', ARC)];
+const RESULT = [N('成功', LOCS, OK, '禁区一圈造威胁 · 位置'), N('失败', 0, FA)];
+const METHOD_NAMES = ['传控', '长传', '高压中场抢断', '后场得球反击', '得到解围球继续进攻'];
+const METHOD_CH = ['传', '长', '抢', '反', '解'];
+const ROOT = N('推进', METHOD_NAMES.map(m => N(m, RESULT, 0, '是否到达禁区周围一圈')), 0, '推进 · 方式');
+const CUSTOM_METHOD = N('额外', RESULT, 0, '是否到达禁区周围一圈');
+const SIEGE_I = '4';
+const SIEGE_GAP = 180, SIEGE_MIN = 3;
+
+function walk(path, xs){
+  let node = ROOT, xi = 0, customEnd = false;
+  const chain = [];
+  for (let i = 0; i < path.length; i++){
+    const c = path[i];
+    if (c === '*'){
+      chain.push({ label: (xs && xs[xi++]) || '额外', tag: 0, custom: true });
+      if (node === ROOT){ node = CUSTOM_METHOD; continue; }
+      node = null; customEnd = true; break;
+    }
+    const k = node && node.kids ? node.kids[c.charCodeAt(0) - 48] : null;
+    if (!k){ node = null; break; }
+    chain.push({ label: k.label, tag: k.tag });
+    node = k.kids ? k : null;
+    if (!node) break;
+  }
+  return { chain, node, customEnd };
+}
+const levelOf = chain => chain.reduce((L, c) =>
+  Math.max(L, c.tag & GL ? 4 : c.tag & CO ? 3 : c.tag & (TH | SH) ? 2 : c.tag & OK ? 1 : c.tag & FA ? 0 : -1), -1);
+
+const REFS = { WING, SHOT: SHOT_OUT, THROUGH };
+function ser(node){
+  if (!node.kids) return node.label;
+  for (const k in REFS) if (node.kids === REFS[k]) return [node.label, '@' + k];
+  return [node.label, ...node.kids.map(ser)];
+}
+const TREE_SER = { method: METHOD_NAMES, afterMethod: RESULT.map(ser),
+  refs: { WING: WING.map(ser), SHOT: SHOT_OUT.map(ser), THROUGH: THROUGH.map(ser) } };
+const README = '角球事件記錄匯出檔（fmt=1）。matches 是比賽陣列，每場：id、d 日期、lg 聯賽、h 主隊、a 客隊、st 狀態(1進行中/2已結束)、fs 最終比分[主,客]、fc 最終角球數[主,客]、pe 各半場結束時的比賽時鐘秒數、ev 事件陣列。'
+ + '每個事件 = [t 事件發生的比賽時鐘秒數（第一次點選的時刻；下半場從2700起算）, p 半場(1上半/2下半/3加時上/4加時下), s 進攻方(0=主隊進攻客隊防守, 1=客隊進攻主隊防守), path 選擇路徑, r 結果(0推進失敗/1推進成功未造威脅/2造威脅/3角球/4進球), f 旗標(1=選到一半就提交, 2=不經推進直接記錄的角球或進球), x 「額外」輸入的文字陣列, n 備註]；後面沒有值的欄位會省略。'
+ + 'path 每個字元是該層選項的序號（0起算）：第1字元對照 tree.method（推進方式），第2字元對照 tree.afterMethod（成功/失败），之後逐層對照所選節點的子節點。"*" 代表「額外」，文字依序放在 x；推進方式那一層的額外之後仍接 成功/失败，其他層的額外代表路線到此結束、結果看 r。'
+ + 'tree 的節點寫成 [標籤, 子節點...]，末端只寫標籤；子節點寫成 "@名稱" 代表使用 tree.refs.名稱 這組共用分支。「下底突破→被挡出底线」算角球。';
+
+/* ================= 2. 基本工具 ================= */
+const $ = (s, r) => (r || document).querySelector(s);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const pad2 = n => String(n).padStart(2, '0');
+const LEVELS = ['推進失敗', '推進成功', '造威脅', '角球', '進球'];
+const PER = { 1: [0, 2700, '上半場'], 2: [2700, 5400, '下半場'], 3: [5400, 6300, '加時上'], 4: [6300, 7200, '加時下'] };
+const nowSec = () => Math.floor(Date.now() / 1000);
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+function fmtClock(p, t){
+  t = Math.max(0, Math.floor(t)); const end = PER[p][1];
+  if (t > end){ const x = t - end; return `${end / 60}+${Math.floor(x / 60)}:${pad2(x % 60)}`; }
+  return `${pad2(Math.floor(t / 60))}:${pad2(t % 60)}`;
+}
+function fmtMin(p, t){
+  const E = PER[p][1];
+  if (t > E + 0.5){ const x = (t - E) / 60; return `${E / 60}+${Number.isInteger(x) ? x : x.toFixed(1)}'`; }
+  const m = t / 60; return `${Number.isInteger(m) ? m : m.toFixed(1)}'`;
+}
+const mmss = t => `${Math.floor(t / 60)}:${pad2(Math.floor(t % 60))}`;
+const isStandalone = () => !!(navigator.standalone || (window.matchMedia && matchMedia('(display-mode: standalone)').matches));
+const phoneMQ = matchMedia('(max-width: 719px)');
+let evSeq = 0;
+const LS = {
+  get(k, d){ try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch(e){ return d; } },
+  set(k, v){ try { localStorage.setItem(k, JSON.stringify(v)); } catch(e){} }
+};
+
+/* ================= 3. 資料格式（精簡） ================= */
+function prep(e){ const w = walk(e.path, e.xs); e._chain = w.chain; e._shot = w.chain.some(c => c.tag & SH); return e; }
+function newMatch(prev){
+  const d = new Date();
+  return { id: 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), v: 1, c: nowSec(), u: nowSec(),
+    d: `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`, lg: prev ? prev.lg : '', h: '', a: '', st: 1,
+    fs: null, fc: null, pe: {}, tm: { p: 1, b: 0, r: 0, at: 0 }, events: [] };
+}
+const evKey = e => e.p * 100000 + e.t;
+function sortEvents(m){ m.events.sort((x, y) => evKey(x) - evKey(y) || x._id - y._id); }
+function encEv(e){
+  const a = [e.t, e.p, e.s, e.path, e.r];
+  const x = e.xs && e.xs.length ? e.xs : 0, n = e.n || '';
+  if (e.fl || x || n) a.push(e.fl || 0);
+  if (x || n) a.push(x);
+  if (n) a.push(n);
+  return a;
+}
+function decEv(a){
+  return prep({ t: Math.max(0, +a[0] || 0), p: PER[+a[1]] ? +a[1] : 1, s: a[2] ? 1 : 0, path: String(a[3] || ''), r: Math.max(0, Math.min(4, +a[4] || 0)),
+    fl: +a[5] || 0, xs: Array.isArray(a[6]) ? a[6].map(String) : [], n: a[7] ? String(a[7]) : '', _id: ++evSeq });
+}
+function encMatch(m, forExport){
+  const o = { id: m.id, v: 1, c: m.c, u: m.u, d: m.d, lg: m.lg, h: m.h, a: m.a, st: m.st };
+  if (m.fs) o.fs = m.fs; if (m.fc) o.fc = m.fc;
+  if (Object.keys(m.pe).length) o.pe = m.pe;
+  if (!forExport) o.tm = m.tm;
+  o.ev = m.events.map(encEv);
+  return o;
+}
+function decMatch(o){
+  const m = { id: String(o.id), v: 1, c: o.c || nowSec(), u: o.u || o.c || 0, d: String(o.d || ''), lg: String(o.lg || ''), h: String(o.h || ''), a: String(o.a || ''),
+    st: o.st === 1 ? 1 : 2, fs: o.fs || null, fc: o.fc || null, pe: o.pe || {}, tm: null, events: (o.ev || []).map(decEv) };
+  sortEvents(m);
+  if (o.tm && PER[o.tm.p]) m.tm = { p: o.tm.p, b: +o.tm.b || 0, r: o.tm.r ? 1 : 0, at: +o.tm.at || 0 };
+  else { const last = m.events[m.events.length - 1]; m.tm = { p: last ? last.p : 1, b: last ? last.t : 0, r: 0, at: 0 }; }
+  return m;
+}
+const isEmpty = m => !m.events.length && !m.lg && !m.h && !m.a && !m.tm.b && !m.tm.r;
+
+/* ================= 4. 本機儲存（IndexedDB，失敗時改用 localStorage） ================= */
+const Store = (() => {
+  let db = null, mode = 'idb';
+  const KEY = 'corner-log-matches';
+  const lsAll = () => LS.get(KEY, {}) || {};
+  const lsSave = o => { try { localStorage.setItem(KEY, JSON.stringify(o)); return true; } catch(e){ return false; } };
+  function openDB(){
+    return new Promise((res, rej) => {
+      try {
+        const rq = indexedDB.open('corner-log', 1);
+        rq.onupgradeneeded = () => { if (!rq.result.objectStoreNames.contains('matches')) rq.result.createObjectStore('matches', { keyPath: 'id' }); };
+        rq.onsuccess = () => res(rq.result); rq.onerror = () => rej(rq.error); rq.onblocked = () => rej(new Error('blocked'));
+      } catch(e){ rej(e); }
+    });
+  }
+  function tx(kind, fn){
+    return new Promise((res, rej) => {
+      const t = db.transaction('matches', kind); const r = fn(t.objectStore('matches'));
+      t.oncomplete = () => res(r ? r.result : undefined); t.onerror = t.onabort = () => rej(t.error);
+    });
+  }
+  return {
+    async init(){ try { db = await openDB(); } catch(e){ mode = 'ls'; } try { navigator.storage && navigator.storage.persist && navigator.storage.persist().catch(() => {}); } catch(e){} },
+    async all(){ if (mode === 'idb'){ try { return (await tx('readonly', s => s.getAll())) || []; } catch(e){ mode = 'ls'; } } return Object.values(lsAll()); },
+    async put(o){ if (mode === 'idb'){ try { await tx('readwrite', s => s.put(o)); return true; } catch(e){ mode = 'ls'; } } const a = lsAll(); a[o.id] = o; return lsSave(a); },
+    async del(id){ if (mode === 'idb'){ try { await tx('readwrite', s => s.delete(id)); return true; } catch(e){ mode = 'ls'; } } const a = lsAll(); delete a[id]; return lsSave(a); }
+  };
+})();
+
+/* ================= 5. 狀態與計時器 ================= */
+let M = newMatch();
+const allMatches = new Map();
+const ui = { mode: LS.get('corner-log-mode', 'simple') === 'detail' ? 'detail' : 'simple', win: LS.get('corner-log-win', 'all'),
+  notes: LS.get('corner-log-notes', true) !== false, tab: 0, legend: false, drafts: [null, null] };
+const tv = { z: 1, off: 0 };
+const teamName = s => (s ? M.a : M.h).trim() || (s ? '客隊' : '主隊');
+
+function clockOf(m){ const t = m.tm; return t.r ? t.b + (Date.now() - t.at) / 1000 : t.b; }
+function setClock(m, sec){ m.tm.b = Math.max(0, Math.round(sec)); if (m.tm.r) m.tm.at = Date.now(); }
+function startClock(m){ if (!m.tm.r){ m.tm.r = 1; m.tm.at = Date.now(); } }
+function pauseClock(m){ if (m.tm.r){ m.tm.b = Math.round(clockOf(m)); m.tm.r = 0; } }
+function maxEventT(m, p){ return m.events.reduce((a, e) => e.p === p ? Math.max(a, e.t) : a, 0); }
+function setPeriod(m, p, sec, run){
+  const cur = m.tm.p, c = clockOf(m);
+  if (p > cur){
+    for (let q = cur; q < p; q++){
+      if (m.pe[q]) continue;
+      const E = PER[q][1];
+      m.pe[q] = (q === cur && c >= E && c <= E + 1200) ? Math.round(c) : Math.max(E, maxEventT(m, q));
+    }
+  }
+  m.tm.p = p; m.tm.b = Math.max(0, Math.round(sec)); m.tm.at = Date.now();
+  if (run) m.tm.r = 1;
+}
+
+let saveT = 0;
+const touch = () => { M.u = nowSec(); };
+function saveNow(){
+  clearTimeout(saveT); saveT = 0;
+  if (!isEmpty(M) || allMatches.has(M.id)){
+    const o = encMatch(M); allMatches.set(M.id, o);
+    Store.put(o).then(ok => { if (ok === false) showToast('儲存失敗：空間可能不足，請到倉庫匯出備份'); });
+  }
+  LS.set('corner-log-current', M.id);
+}
+const save = () => { clearTimeout(saveT); saveT = setTimeout(saveNow, 400); };
+addEventListener('pagehide', () => { if (saveT) saveNow(); });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden' && saveT) saveNow(); });
+
+let wakeLock = null;
+async function syncWake(){
+  try {
+    if (M.tm.r && document.visibilityState === 'visible' && 'wakeLock' in navigator){ if (!wakeLock){ wakeLock = await navigator.wakeLock.request('screen'); wakeLock.addEventListener('release', () => { wakeLock = null; }); } }
+    else if (wakeLock){ await wakeLock.release(); wakeLock = null; }
+  } catch(e){ wakeLock = null; }
+}
+document.addEventListener('visibilitychange', syncWake);
+function switchMatch(m){ M = m; ui.drafts = [null, null]; tv.z = 1; tv.off = 0; LS.set('corner-log-current', M.id); }
+
+/* ================= 6. 比賽時間幾何與統計 ================= */
+function periodInfo(m){
+  const live = m.st === 1, curP = m.tm.p, clock = clockOf(m);
+  let maxP = Math.max(2, curP);
+  const maxT = {};
+  for (const e of m.events){ maxP = Math.max(maxP, e.p); maxT[e.p] = Math.max(maxT[e.p] || 0, e.t); }
+  for (const k in m.pe) if (PER[+k]) maxP = Math.max(maxP, +k);
+  const list = [], by = {};
+  let off = 0;
+  for (let p = 1; p <= maxP; p++){
+    const [S, E] = PER[p];
+    let end;
+    if (p === curP) end = live ? clock : (m.pe[p] || clock);
+    else if (p < curP) end = m.pe[p] || E;
+    else end = S;
+    if (maxT[p] != null) end = Math.max(end, maxT[p]);
+    end = Math.max(end, S);
+    const q = { p, S, E, end, dur: end - S, off, disp: Math.max(E - S, end - S) };
+    list.push(q); by[p] = q; off += q.dur;
+  }
+  const cq = by[curP] || list[list.length - 1];
+  const curPos = live ? cq.off + Math.max(0, Math.min(clock, cq.end) - cq.S) : off;
+  return { list, by, curP, clock, curPos, live };
+}
+const posOf = (info, e) => { const q = info.by[e.p]; return q ? q.off + Math.max(0, e.t - q.S) : 0; };
+const WINS = [['all', '全場'], ['h1', '上半場'], ['h2', '下半場'], ['l10', '近10分'], ['l15', '近15分'], ['l30', '近30分']];
+function winRange(info, key){
+  if (key === 'h1' || key === 'h2'){ const q = info.by[key === 'h1' ? 1 : 2]; return { p: q.p, mins: q.dur / 60, a: q.off, b: q.off + q.dur }; }
+  const T = info.curPos;
+  if (key === 'all') return { a: 0, b: Infinity, mins: T / 60 };
+  const n = +key.slice(1) || 10;
+  return { a: Math.max(0, T - n * 60), b: Infinity, mins: Math.min(n, T / 60) };
+}
+const inWin = (info, wr, e) => wr.p ? e.p === wr.p : (posOf(info, e) >= wr.a - 0.5 && posOf(info, e) <= wr.b);
+function calc(m, info, side, wr){
+  let n = 0, s = 0, t = 0, sh = 0, co = 0, go = 0, ix = 0, sg = 0;
+  for (const e of m.events){
+    if (e.s !== side || !inWin(info, wr, e)) continue;
+    if (e.r === 3) co++; if (e.r === 4) go++;
+    if (e.fl & 2) continue;
+    n++; if (e.r >= 1) s++; if (e.r >= 2) t++; ix += e.r;
+    if (e.path[0] === SIEGE_I) sg++;
+    if (e._shot) sh++;
+  }
+  const mins = wr.mins, f = v => mins >= 1 ? v / mins * 10 : null;
+  return { n, sr: n ? s / n : null, nf: f(n), sf: f(s), th: t, tr: s ? t / s : null, tf: f(t), sh, co, go, ix: f(ix), sg };
+}
+function sieges(m, info, side){
+  const list = m.events.filter(e => e.s === side && !(e.fl & 2) && e.path[0] === SIEGE_I).map(e => posOf(info, e)).sort((a, b) => a - b);
+  const out = []; let cur = null;
+  for (const p of list){
+    if (cur && p - cur.b <= SIEGE_GAP){ cur.b = p; cur.n++; }
+    else { if (cur && cur.n >= SIEGE_MIN) out.push(cur); cur = { a: p, b: p, n: 1 }; }
+  }
+  if (cur && cur.n >= SIEGE_MIN) out.push(cur);
+  return out;
+}
+const methodChar = e => e.fl & 2 ? '' : e.path[0] === '*' ? '额' : (METHOD_CH[+e.path[0]] || '');
+function summaryParts(e){
+  if (e.fl & 2) return { head: e.r === 4 ? '進球（不經推進）' : '角球（不經推進）', rest: [] };
+  const ch = e._chain;
+  return { head: ch.slice(0, 2).map(c => c.label).join(' · '), rest: ch.slice(2).map(c => c.label) };
+}
+function shortPath(rest){
+  if (rest.length <= 4) return rest.join(' › ');
+  return [rest[0], rest[1], '…', rest[rest.length - 2], rest[rest.length - 1]].join(' › ');
+}
+function counts(m){ const c = { co: [0, 0], go: [0, 0] }; for (const e of m.events){ if (e.r === 3) c.co[e.s]++; if (e.r === 4) c.go[e.s]++; } return c; }
+
+/* ================= 7. 記分牌 ================= */
+const clockBox = $('#clockBox'), clkEl = $('#clk'), perBtn = $('#perBtn'), runBtn = $('#runBtn');
+const fields = [['fLg', 'lg'], ['fH', 'h'], ['fA', 'a']];
+const PLAY = '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M3 1.2l7.5 4.8L3 10.8z"/></svg>';
+const PAUSE = '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 1.5h2.6v9H2.5zM6.9 1.5h2.6v9H6.9z"/></svg>';
+let lastClk = -1;
+function renderHeader(){
+  for (const [id, key] of fields){ const el = $('#' + id); if (document.activeElement !== el && el.value !== M[key]) el.value = M[key]; }
+  const c = counts(M);
+  $('#gs0').textContent = c.go[0]; $('#gs1').textContent = c.go[1];
+  $('#cn0').textContent = `角球 ${c.co[0]}`; $('#cn1').textContent = `角球 ${c.co[1]}`;
+  $('#mDate').textContent = M.d + (M.st === 2 ? ' · 已結束' : '');
+  perBtn.textContent = PER[M.tm.p][2];
+  runBtn.innerHTML = M.tm.r ? PAUSE : PLAY;
+  runBtn.setAttribute('aria-label', M.tm.r ? '暫停計時' : '開始計時');
+  runBtn.classList.toggle('on', !!M.tm.r);
+  clockBox.classList.toggle('idle', !M.tm.r);
+  lastClk = -1; tickClock();
+}
+function tickClock(){
+  const c = clockOf(M), s = Math.floor(c);
+  if (s !== lastClk){ lastClk = s; clkEl.textContent = fmtClock(M.tm.p, c); }
+}
+function renderBanner(){
+  const el = $('#banner');
+  const others = [...allMatches.values()].filter(o => o.st === 1 && o.id !== M.id && o.ev && o.ev.length);
+  if (M.st === 2){
+    el.innerHTML = `<b>這場比賽已結束</b><span class="bx">仍可補記或修改事件</span><span class="sp"></span>${others.length ? '<button class="ghost" data-a="golive">回到進行中</button>' : ''}<button class="ghost" data-a="reopen">重新設為進行中</button>`;
+    el.hidden = false;
+  } else el.hidden = true;
+}
+
+/* ================= 8. 兩隊記錄面板 ================= */
+const recEl = [$('#rec0'), $('#rec1')], workEl = $('#work'), rtabsEl = $('#rtabs');
+const recentX = () => LS.get('corner-log-recent', []);
+function rememberX(t){ const a = recentX().filter(x => x !== t); a.unshift(t); LS.set('corner-log-recent', a.slice(0, 12)); }
+function optHTML(k, i){
+  const bd = k.tag & GL ? '<span class="bd gl">進球</span>' : k.tag & CO ? '<span class="bd co">角球</span>' : k.kids ? '<span class="go">›</span>' : '';
+  return `<button class="opt" data-a="pick" data-i="${i}">${esc(k.label)}${bd}</button>`;
+}
+const EXTRA_BTN = '<button class="opt ex" data-a="extra">＋ 額外</button>';
+function ensureDraft(side){
+  if (!ui.drafts[side]) ui.drafts[side] = { t: Math.floor(clockOf(M)), p: M.tm.p, path: '', xs: [], mode: 'pick', r: null, n: '', showNote: false, showT: false, txt: '', focus: false };
+  return ui.drafts[side];
+}
+function renderTabs(){
+  workEl.dataset.tab = ui.tab;
+  rtabsEl.innerHTML = [0, 1].map(s => `<button data-tab="${s}" aria-pressed="${ui.tab === s}"><i style="background:var(--${s ? 'away' : 'home'})"></i><span>${esc(teamName(s))} 進攻</span>${ui.drafts[s] ? '<em title="選到一半"></em>' : ''}</button>`).join('');
+}
+function renderRec(side){
+  const el = recEl[side], d = ui.drafts[side];
+  const cnt = M.events.filter(e => e.s === side).length;
+  let h = `<div class="rec-head"><i></i><b>${esc(teamName(side))} 進攻</b><span>${esc(teamName(1 - side))} 防守</span><em>${cnt} 筆</em></div>`;
+  if (!d){
+    h += `<div class="qt">${esc(ROOT.q)}</div><div class="qs">按下第一個選項的那一刻，就是這個事件的比賽時間${M.tm.r ? '' : '（計時器目前沒有在走）'}</div>`;
+    h += `<div class="opts">${ROOT.kids.map(optHTML).join('')}${EXTRA_BTN}</div>`;
+    h += `<div class="quick"><span>不經推進的</span><button class="ghost" data-a="quick" data-k="3">＋ 角球</button><button class="ghost" data-a="quick" data-k="4">＋ 進球</button></div>`;
+    el.innerHTML = h; renderTabs(); return;
+  }
+  const w = walk(d.path, d.xs);
+  h += `<div class="trail"><button class="tchip" data-a="tshow" title="調整事件時間">${fmtClock(d.p, d.t)}</button>${w.chain.map((c, i) => `${i ? '<span class="sep">›</span>' : ''}<span class="${c.custom ? 'cu' : ''}">${c.custom ? '額外：' : ''}${esc(c.label)}</span>`).join('')}</div>`;
+  if (d.showT) h += `<div class="tadj"><button class="ghost" data-a="tadj" data-d="-60">−1分</button><button class="ghost" data-a="tadj" data-d="-10">−10秒</button><button class="ghost" data-a="tadj" data-d="10">+10秒</button><button class="ghost" data-a="tadj" data-d="60">+1分</button><button class="ghost" data-a="tnow">改成現在</button></div>`;
+  let canEarly = false, isEnd = false;
+  if (d.mode === 'text'){
+    const sg = recentX();
+    h += `<div class="qt">額外：這一步實際發生了什麼？</div><div class="txt"><input class="fi xin" data-side="${side}" maxlength="40" placeholder="例如：犯規、越位、門將出擊" value="${esc(d.txt)}" enterkeyhint="done" autocomplete="off">`
+      + (sg.length ? `<div class="sugs">${sg.map(t => `<button class="ghost" data-a="xsug" data-t="${esc(t)}">${esc(t)}</button>`).join('')}</div>` : '')
+      + `<div class="row"><button class="pill dark" data-a="xok">確定</button><span class="qs" style="margin:0">${d.path === '' ? '之後照常接著選「成功／失败」' : '之後請選這次的結果'}</span></div></div>`;
+  } else if (d.mode === 'classify'){
+    const min = w.chain.slice(0, -1).some(c => c.tag & OK) ? 1 : 0;
+    h += `<div class="qt">這次的結果是？</div><div class="qs">選了「額外」的路線到這裡結束，時間軸會照你選的結果標示</div>`
+      + `<div class="opts">${[0, 1, 2, 3, 4].filter(l => l >= min).map(l => `<button class="opt" data-a="cls" data-l="${l}"><span class="lvl lv${l}">${LEVELS[l]}</span></button>`).join('')}</div>`;
+  } else if (w.node){
+    canEarly = w.chain.some(c => c.tag & (OK | FA));
+    h += `<div class="qt">${esc(w.node.q || w.node.label)}</div><div class="opts">${w.node.kids.map(optHTML).join('')}${EXTRA_BTN}</div>`;
+  } else {
+    isEnd = true;
+    const r = d.r != null ? d.r : Math.max(0, levelOf(w.chain));
+    h += `<div class="endv"><span class="qs" style="margin:0">已選到最後，確認後按提交</span><span class="lvl lv${r}">${LEVELS[r]}</span>`
+      + (d.showNote ? `<input class="fi nin" data-side="${side}" maxlength="80" placeholder="備註（可不填）" value="${esc(d.n)}" autocomplete="off">` : '<button class="linkbtn" data-a="note">加備註</button>') + '</div>';
+  }
+  h += `<div class="foot"><button class="ghost" data-a="back">‹ 上一步</button><button class="ghost" data-a="cancel">取消</button><span class="sp"></span>`
+    + (canEarly ? '<button class="early" data-a="early">到此提交</button>' : '') + (isEnd ? '<button class="submit" data-a="submit">提交</button>' : '') + '</div>';
+  el.innerHTML = h;
+  renderTabs();
+  if (d.focus){ d.focus = false; const inp = el.querySelector('.xin, .nin'); if (inp){ inp.focus(); try { const n = inp.value.length; inp.setSelectionRange(n, n); } catch(e){} } }
+}
+function popLast(d){ const c = d.path.slice(-1); d.path = d.path.slice(0, -1); if (c === '*') d.xs.pop(); }
+function recAction(side, a, btn){
+  let d = ui.drafts[side];
+  switch (a){
+    case 'pick': d = ensureDraft(side); d.path += btn.dataset.i; d.r = null; d.mode = 'pick'; break;
+    case 'extra': d = ensureDraft(side); d.mode = 'text'; d.txt = ''; d.focus = true; break;
+    case 'xsug': if (d){ d.txt = btn.dataset.t; return xok(side); } break;
+    case 'xok': return xok(side);
+    case 'cls': d.r = +btn.dataset.l; d.mode = 'pick'; break;
+    case 'back':
+      if (!d) break;
+      if (d.mode === 'text'){ d.mode = 'pick'; if (!d.path) ui.drafts[side] = null; break; }
+      if (d.mode === 'classify'){ popLast(d); d.mode = 'pick'; break; }
+      { const w = walk(d.path, d.xs); if (!w.node && w.customEnd){ d.r = null; d.mode = 'classify'; break; } }
+      if (!d.path){ ui.drafts[side] = null; break; }
+      popLast(d); d.r = null; break;
+    case 'cancel': ui.drafts[side] = null; break;
+    case 'tshow': d.showT = !d.showT; break;
+    case 'tadj': d.t = Math.max(0, d.t + (+btn.dataset.d)); break;
+    case 'tnow': d.t = Math.floor(clockOf(M)); d.p = M.tm.p; break;
+    case 'note': d.showNote = true; d.focus = true; break;
+    case 'early': return submit(side, true);
+    case 'submit': return submit(side, false);
+    case 'quick': return quick(side, +btn.dataset.k);
+  }
+  renderRec(side);
+}
+function xok(side){
+  const d = ui.drafts[side]; const t = (d.txt || '').trim();
+  if (!t){ showToast('請先輸入文字'); return; }
+  d.xs.push(t); d.path += '*'; rememberX(t);
+  d.mode = d.path === '*' ? 'pick' : 'classify';
+  renderRec(side);
+}
+function submit(side, early){
+  const d = ui.drafts[side]; if (!d) return;
+  const w = walk(d.path, d.xs);
+  const r = d.r != null ? d.r : Math.max(0, levelOf(w.chain));
+  const e = prep({ t: d.t, p: d.p, s: side, path: d.path, xs: d.xs.slice(), r, fl: early ? 1 : 0, n: (d.n || '').trim(), _id: ++evSeq });
+  ui.drafts[side] = null;
+  addEvent(e);
+}
+function quick(side, r){
+  addEvent(prep({ t: Math.floor(clockOf(M)), p: M.tm.p, s: side, path: '', xs: [], r, fl: 2, n: '', _id: ++evSeq }));
+}
+function addEvent(e){
+  M.events.push(e); sortEvents(M); touch(); saveNow(); renderAll();
+  const sp = summaryParts(e);
+  showToast(`已記錄 ${fmtClock(e.p, e.t)}　${teamName(e.s)}　${sp.head}${sp.rest.length ? ' › … › ' + sp.rest[sp.rest.length - 1] : ''}（${LEVELS[e.r]}）`, () => removeEvent(e._id));
+  if (ui.mode === 'detail') requestAnimationFrame(() => { cardsEl.scrollLeft = cardsEl.scrollWidth; });
+}
+function removeEvent(id){ M.events = M.events.filter(e => e._id !== id); touch(); saveNow(); renderAll(); }
+for (const side of [0, 1]){
+  recEl[side].addEventListener('click', ev => { const b = ev.target.closest('[data-a]'); if (b) recAction(side, b.dataset.a, b); });
+  recEl[side].addEventListener('input', ev => {
+    const d = ui.drafts[side]; if (!d) return;
+    if (ev.target.matches('.xin')) d.txt = ev.target.value;
+    if (ev.target.matches('.nin')) d.n = ev.target.value;
+  });
+  recEl[side].addEventListener('keydown', ev => { if (ev.key === 'Enter' && ev.target.matches('.xin')){ ev.preventDefault(); xok(side); } });
+}
+rtabsEl.addEventListener('click', ev => { const b = ev.target.closest('[data-tab]'); if (b){ ui.tab = +b.dataset.tab; renderTabs(); } });
+
+/* ================= 9. 時間軸（可縮放） ================= */
+const tlWrap = $('#tlWrap'), tlSvg = $('#tl'), cardsEl = $('#cards');
+let tlHeads = [], tlLast = null;
+const Z_MAX = 12, PAD_L = 22, PAD_R = 8, GAP = 16;
+const SVGI = {
+  fail: '<svg viewBox="-8 -8 16 16"><circle class="hd l0" r="3.4"/></svg>',
+  ok: '<svg viewBox="-8 -8 16 16"><circle class="hd home l1" r="3.8"/></svg>',
+  th: '<svg viewBox="-8 -8 16 16"><circle class="hd home l2" r="5.6"/></svg>',
+  co: '<svg viewBox="-8 -8 16 16"><line class="sm home l3" x1="-3" y1="7" x2="-3" y2="-7"/><path class="fl home" d="M-3 -7L8 -3L-3 1Z"/></svg>',
+  go: '<svg viewBox="-8 -8 16 16"><circle class="bl" r="6.5"/><circle class="bc" r="2.4"/></svg>',
+  sg: '<svg viewBox="-8 -8 16 16"><path class="hd home l2" d="M0 -6L6 0L0 6L-6 0Z"/></svg>',
+  band: '<svg viewBox="-8 -8 16 16"><rect class="sg home" x="-8" y="-6" width="16" height="12" rx="2"/></svg>'
+};
+function renderLegend(){
+  let h = `<span>${SVGI.fail}推進失敗</span><span>${SVGI.ok}推進成功</span><span>${SVGI.th}造威脅</span><span>${SVGI.co}角球</span><span>${SVGI.go}進球</span><span>${SVGI.sg}解圍後再進攻</span><span>${SVGI.band}圍攻時段</span>`;
+  if (ui.mode === 'detail') h += '<span class="ld">圓點裡的字＝推進方式：传 传控 · 长 长传 · 抢 高压中场抢断 · 反 后场得球反击 · 解 得到解围球继续进攻 · 额 額外　｜　淡色曲線＝攻勢（前後5分鐘加權）</span>';
+  const lg = $('#legend'); lg.innerHTML = h; lg.classList.toggle('open', ui.legend);
+  document.querySelectorAll('.tog [data-mode]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.mode === ui.mode)));
+}
+/* 幾何：z=1 時整場剛好塞滿寬度；z>1 時按比例拉長，off 是往右捲動的像素 */
+function geometry(info, W, z){
+  const ps = info.list, inner = W - PAD_L - PAD_R;
+  const totalDisp = ps.reduce((a, q) => a + q.disp, 0);
+  const k = (inner - GAP * (ps.length - 1)) / totalDisp * z;
+  const starts = []; let c = 0;
+  for (const q of ps){ starts.push(c); c += q.disp * k + GAP; }
+  const contentW = c - GAP;
+  return { ps, inner, k, starts, contentW, maxOff: Math.max(0, contentW - inner), W };
+}
+function contentX(g, p, t){ const i = g.ps.findIndex(q => q.p === p); const j = i < 0 ? g.ps.length - 1 : i; const q = g.ps[j]; return g.starts[j] + clamp(t - q.S, 0, q.disp) * g.k; }
+function invContent(g, c){
+  for (let i = 0; i < g.ps.length; i++){
+    const q = g.ps[i], a = g.starts[i], b = a + q.disp * g.k;
+    if (c <= b + GAP / 2 || i === g.ps.length - 1) return { p: q.p, t: q.S + clamp(c - a, 0, q.disp * g.k) / g.k };
+  }
+  return { p: 1, t: 0 };
+}
+function headSVG(e, x, y, side, detail){
+  const team = side ? 'away' : 'home';
+  if (e.r === 3){
+    const d = side ? -1 : 1, s = detail ? 1.25 : 1, ch = detail ? methodChar(e) : '';
+    return `<path class="fl ${team}" d="M${x} ${y}L${(x + 11 * s).toFixed(1)} ${(y + d * 4 * s).toFixed(1)}L${x} ${(y + d * 8 * s).toFixed(1)}Z"/>`
+      + (ch ? `<text class="hl l0" x="${(x - 9).toFixed(1)}" y="${(y + d * 4 * s + 3.6).toFixed(1)}">${ch}</text>` : '');
+  }
+  if (e.r === 4){
+    const R = detail ? 8.5 : 7, ch = detail ? methodChar(e) : '';
+    return `<circle class="bl" cx="${x}" cy="${y}" r="${R}"/><circle class="bc" cx="${x}" cy="${y}" r="${(R * 0.36).toFixed(1)}"/>`
+      + (ch ? `<text class="hl l0" x="${(x - R - 7).toFixed(1)}" y="${(y + 3.6).toFixed(1)}">${ch}</text>` : '');
+  }
+  const R = detail ? 8.5 : [3.4, 3.8, 5.6][e.r];
+  const cls = `hd ${team} l${e.r}`;
+  const siege = !(e.fl & 2) && e.path[0] === SIEGE_I;
+  const D = +(R * 1.28).toFixed(1);
+  let s = siege ? `<path class="${cls}" d="M${x} ${(y - D).toFixed(1)}L${(x + D).toFixed(1)} ${y}L${x} ${(y + D).toFixed(1)}L${(x - D).toFixed(1)} ${y}Z"/>`
+    : `<circle class="${cls}" cx="${x}" cy="${y}" r="${R}"/>`;
+  if (detail){ const ch = methodChar(e); if (ch) s += `<text class="hl ${team} l${e.r}" x="${x}" y="${(y + 3.6).toFixed(1)}">${ch}</text>`; }
+  return s;
+}
+function renderTimeline(){
+  const detail = ui.mode === 'detail', compact = phoneMQ.matches;
+  const W = Math.max(280, Math.round(tlWrap.clientWidth || 300));
+  const info = periodInfo(M);
+  const g = geometry(info, W, tv.z);
+  tv.off = clamp(tv.off, 0, g.maxOff);
+  const off = tv.off;
+  tlLast = { info, g, W };
+  const SX = c => PAD_L + c - off;
+  const X = (p, t) => SX(contentX(g, p, t));
+  const XP = pos => {
+    for (let i = 0; i < g.ps.length; i++){
+      const q = g.ps[i], next = g.ps[i + 1];
+      if (pos <= q.off + q.dur || !next || next.dur <= 0) return SX(g.starts[i] + clamp(pos - q.off, 0, q.disp) * g.k);
+    }
+    return PAD_L;
+  };
+  const LV = compact ? (detail ? [13, 30, 47, 64, 81] : [8, 18, 30, 42, 54]) : (detail ? [16, 38, 60, 82, 104] : [11, 25, 41, 57, 73]);
+  const R = 8.5, x0v = PAD_L - 12, x1v = W - PAD_R + 12;
+  const items = [[], []];
+  for (const e of M.events){ const x = +X(e.p, e.t).toFixed(1); if (x >= x0v && x <= x1v) items[e.s].push({ e, x, y: LV[e.r] }); }
+  const ext = [0, 0];
+  for (let s = 0; s < 2; s++){
+    if (detail){
+      const placed = [];
+      for (const it of items[s]){
+        let y = it.y, n = 0;
+        while (n++ < 40 && placed.some(p => Math.abs(p.x - it.x) < 2 * R && Math.abs(p.y - y) < 2 * R)) y += 2 * R + 1;
+        it.y = y; placed.push(it);
+      }
+    }
+    ext[s] = items[s].reduce((m, it) => Math.max(m, it.y), 0);
+  }
+  const top = Math.max(LV[4] + 14, ext[0] + 14), bot = Math.max(LV[4] + 14, ext[1] + 14);
+  const axisY = top + 2, H = axisY + bot + 20, base = H - 6;
+  let gx = '';
+  // 統計時段
+  if (ui.win !== 'all'){
+    const wr = winRange(info, ui.win);
+    let xa, xb;
+    if (wr.p){ const i = g.ps.findIndex(q => q.p === wr.p); xa = SX(g.starts[i]); xb = SX(g.starts[i] + g.ps[i].dur * g.k); }
+    else { xa = XP(wr.a); xb = XP(info.curPos); }
+    if (xb - xa > 0.5) gx += `<rect class="wn" x="${xa.toFixed(1)}" y="0" width="${(xb - xa).toFixed(1)}" height="${base - 12}"/>`;
+  }
+  // 圍攻時段
+  for (const s of [0, 1]){
+    for (const b of sieges(M, info, s)){
+      const xa = XP(Math.max(0, b.a - 20)), xb = XP(b.b + 20), team = s ? 'away' : 'home';
+      const y0 = s ? axisY + 1 : 2, hh = s ? bot - 4 : top - 2;
+      gx += `<rect class="sg ${team}" x="${xa.toFixed(1)}" y="${y0}" width="${Math.max(6, xb - xa).toFixed(1)}" height="${hh}" rx="4"/>`;
+      gx += `<text class="sgl ${team}" x="${(xa + 4).toFixed(1)}" y="${s ? axisY + bot - 8 : 14}">圍攻 ×${b.n}</text>`;
+    }
+  }
+  // 刻度（隨縮放自動變細）
+  const ppm = g.k * 60;
+  const major = [1, 2, 5, 10, 15].find(m => m * ppm >= 46) || 15;
+  const minor = { 1: 0.5, 2: 1, 5: 1, 10: 5, 15: 5 }[major];
+  for (let i = 0; i < g.ps.length; i++){
+    const q = g.ps[i];
+    const step = minor * 60, mstep = major * 60;
+    for (let t = Math.ceil(q.S / step) * step; t - q.S <= q.disp + 0.1; t += step){
+      const x = SX(g.starts[i] + (t - q.S) * g.k);
+      if (x < PAD_L - 2 || x > W - PAD_R + 2) continue;
+      const xs = x.toFixed(1);
+      if (Math.abs(t % mstep) < 0.01){
+        gx += `<line class="gd" x1="${xs}" y1="4" x2="${xs}" y2="${base - 12}"/>`;
+        if (!(t === q.S && q.p > 1)) gx += `<text class="tk" x="${xs}" y="${base}">${fmtMin(q.p, t)}</text>`;
+      } else gx += `<line class="mt" x1="${xs}" y1="${axisY - 3}" x2="${xs}" y2="${axisY + 3}"/>`;
+    }
+    const xa = SX(g.starts[i]), xe = SX(g.starts[i] + (q.E - q.S) * g.k), xend = SX(g.starts[i] + q.disp * g.k);
+    gx += `<line class="ax" x1="${xa.toFixed(1)}" y1="${axisY}" x2="${xe.toFixed(1)}" y2="${axisY}"/>`;
+    if (q.disp > q.E - q.S){
+      gx += `<line class="ax st2" x1="${xe.toFixed(1)}" y1="${axisY}" x2="${xend.toFixed(1)}" y2="${axisY}"/>`;
+      if (major >= 5 && xend - xe >= 30) gx += `<text class="tk" x="${((xe + xend) / 2 + 6).toFixed(1)}" y="${base}">+${Math.round((q.dur - (q.E - q.S)) / 60)}</text>`;
+    }
+    if (i < g.ps.length - 1){ const xm = (xend + GAP / 2).toFixed(1); gx += `<text class="tk ht" x="${xm}" y="${axisY + 4}">${q.p === 1 ? 'HT' : q.p === 2 ? 'FT' : '┃'}</text>`; }
+  }
+  // 攻勢曲線（詳細）
+  if (detail && M.events.length){
+    const WT = [0.5, 1, 2, 3, 4], STEP = tv.z > 4 ? 15 : 30, KR = 300;
+    const pos = [0, 1].map(s => M.events.filter(e => e.s === s).map(e => [posOf(info, e), WT[e.r], e.p]));
+    const series = [[], []]; let maxV = 0.0001;
+    g.ps.forEach((q, i) => {
+      if (q.dur <= 0) return;
+      for (let t = 0; t <= q.dur + 0.1; t += STEP){
+        const P = q.off + Math.min(t, q.dur);
+        for (const s of [0, 1]){
+          let v = 0; for (const [ep, w, epP] of pos[s]){ if (epP !== q.p) continue; const d = Math.abs(P - ep); if (d < KR) v += w * (1 - d / KR); }
+          series[s].push({ i, t: Math.min(t, q.dur), v }); maxV = Math.max(maxV, v);
+        }
+      }
+    });
+    const HM = compact ? 36 : 54;
+    for (const s of [0, 1]){
+      const team = s ? 'away' : 'home', dir = s ? 1 : -1;
+      g.ps.forEach((q, i) => {
+        const pts = series[s].filter(o => o.i === i); if (pts.length < 2) return;
+        let d = `M${SX(g.starts[i]).toFixed(1)} ${axisY}`;
+        for (const o of pts) d += `L${SX(g.starts[i] + o.t * g.k).toFixed(1)} ${(axisY + dir * o.v / maxV * HM).toFixed(1)}`;
+        d += `L${SX(g.starts[i] + pts[pts.length - 1].t * g.k).toFixed(1)} ${axisY}Z`;
+        gx += `<path class="mo ${team}" d="${d}"/>`;
+      });
+    }
+  }
+  // 事件
+  tlHeads = [];
+  for (const s of [0, 1]){
+    const team = s ? 'away' : 'home', dir = s ? 1 : -1;
+    for (const it of items[s]){
+      const e = it.e, ys = +(axisY + dir * it.y).toFixed(1);
+      gx += `<line class="sm ${team} l${e.r}${e.fl & 2 ? ' q' : ''}" x1="${it.x}" y1="${axisY + dir * 2}" x2="${it.x}" y2="${ys}"/>`;
+      gx += headSVG(e, it.x, ys, s, detail);
+      tlHeads.push({ x: it.x, y: e.r === 3 ? ys + dir * 4 : ys, id: e._id });
+    }
+  }
+  // 現在
+  if (info.live && (M.tm.r || M.tm.b > 0)){
+    const q = info.by[info.curP];
+    if (q && info.clock >= q.S){ const x = X(info.curP, info.clock); if (x >= PAD_L - 1 && x <= W - PAD_R + 1) gx += `<line class="nw" x1="${x.toFixed(1)}" y1="2" x2="${x.toFixed(1)}" y2="${base - 12}"/>`; }
+  }
+  let svg = `<defs><clipPath id="tlc"><rect x="${PAD_L - 10}" y="0" width="${W - PAD_L - PAD_R + 20}" height="${H}"/></clipPath></defs><g clip-path="url(#tlc)">${gx}</g>`;
+  svg += `<text class="sd home" x="9" y="${(axisY - top / 2).toFixed(1)}">主</text><text class="sd away" x="9" y="${(axisY + bot / 2).toFixed(1)}">客</text>`;
+  if (!M.events.length) svg += `<text class="em" x="${(W / 2).toFixed(0)}" y="${axisY - (compact ? 16 : 22)}">還沒有事件　·　選推進方式開始記錄</text><text class="em" x="${(W / 2).toFixed(0)}" y="${axisY + (compact ? 26 : 30)}">主隊在上、客隊在下，越高代表進攻越深入</text>`;
+  tlSvg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  tlSvg.setAttribute('width', W); tlSvg.setAttribute('height', H);
+  tlSvg.classList.toggle('dt', detail);
+  tlSvg.innerHTML = svg;
+  // 縮放資訊
+  const zl = $('#zLabel');
+  if (tv.z > 1.02){
+    const a = invContent(g, off), b = invContent(g, off + g.inner);
+    zl.textContent = `×${tv.z.toFixed(1)}　${fmtMin(a.p, Math.round(a.t / 60) * 60)}–${fmtMin(b.p, Math.round(b.t / 60) * 60)}`;
+  } else zl.textContent = '雙指可放大';
+  $('#zOut').disabled = tv.z <= 1.001; $('#zAll').disabled = tv.z <= 1.001;
+  $('#zNow').hidden = !(info.live && tv.z > 1.02);
+}
+let tlRaf = 0;
+const scheduleTL = () => { if (!tlRaf) tlRaf = requestAnimationFrame(() => { tlRaf = 0; renderTimeline(); }); };
+function setZoom(z, fx, focus){
+  if (!tlLast) return;
+  tv.z = clamp(z, 1, Z_MAX);
+  const g = geometry(tlLast.info, tlLast.W, tv.z);
+  const c = focus ? contentX(g, focus.p, focus.t) : 0;
+  tv.off = clamp(c - (fx - PAD_L), 0, g.maxOff);
+  scheduleTL();
+}
+function focusAt(fx){ return tlLast ? invContent(tlLast.g, fx - PAD_L + tv.off) : null; }
+function zoomBy(f){ if (!tlLast) return; const fx = PAD_L + tlLast.g.inner / 2; setZoom(tv.z * f, fx, focusAt(fx)); }
+$('#zIn').addEventListener('click', () => zoomBy(1.6));
+$('#zOut').addEventListener('click', () => zoomBy(1 / 1.6));
+$('#zAll').addEventListener('click', () => { tv.z = 1; tv.off = 0; renderTimeline(); });
+$('#zNow').addEventListener('click', () => {
+  if (!tlLast) return; const { info, g } = tlLast;
+  tv.off = clamp(contentX(g, info.curP, info.clock) - g.inner * 0.8, 0, g.maxOff); renderTimeline();
+});
+/* 手勢：單指左右拖動（含慣性）、雙指縮放、點一下開啟事件 */
+const tg = { pts: new Map(), pan: null, pinch: null, moved: false, vx: 0, lx: 0, lt: 0, inert: 0 };
+const local = e => { const r = tlWrap.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
+tlWrap.addEventListener('pointerdown', e => {
+  if (e.pointerType === 'mouse' && e.button !== 0) return;
+  cancelAnimationFrame(tg.inert); tg.inert = 0;
+  try { tlWrap.setPointerCapture(e.pointerId); } catch(_){}
+  const p = local(e); tg.pts.set(e.pointerId, p);
+  if (tg.pts.size === 1){ tg.pan = { x: p.x, off: tv.off }; tg.moved = false; tg.vx = 0; tg.lx = p.x; tg.lt = performance.now(); }
+  else if (tg.pts.size === 2){
+    const [a, b] = [...tg.pts.values()];
+    tg.pinch = { d: Math.hypot(a.x - b.x, a.y - b.y) || 1, z: tv.z, focus: focusAt((a.x + b.x) / 2) };
+    tg.moved = true; tg.pan = null;
+  }
+});
+tlWrap.addEventListener('pointermove', e => {
+  if (!tg.pts.has(e.pointerId)) return;
+  const p = local(e); tg.pts.set(e.pointerId, p);
+  if (tg.pinch && tg.pts.size >= 2){
+    const [a, b] = [...tg.pts.values()];
+    setZoom(tg.pinch.z * (Math.hypot(a.x - b.x, a.y - b.y) || 1) / tg.pinch.d, (a.x + b.x) / 2, tg.pinch.focus);
+    return;
+  }
+  if (tg.pan){
+    const dx = p.x - tg.pan.x;
+    if (!tg.moved && Math.abs(dx) > 6){ tg.moved = true; tlWrap.classList.add('drag'); }
+    if (tg.moved){
+      tv.off = tg.pan.off - dx;
+      const now = performance.now(), dt = now - tg.lt;
+      if (dt > 0) tg.vx = 0.7 * ((p.x - tg.lx) / dt) + 0.3 * tg.vx;
+      tg.lx = p.x; tg.lt = now; scheduleTL();
+    }
+  }
+});
+function tlUp(e){
+  if (!tg.pts.has(e.pointerId)) return;
+  const p = tg.pts.get(e.pointerId); tg.pts.delete(e.pointerId);
+  try { tlWrap.releasePointerCapture(e.pointerId); } catch(_){}
+  if (tg.pinch){
+    if (tg.pts.size < 2){ tg.pinch = null; const rest = [...tg.pts.values()][0]; tg.pan = rest ? { x: rest.x, off: tv.off } : null; tg.lx = rest ? rest.x : 0; tg.lt = performance.now(); tg.vx = 0; }
+    return;
+  }
+  if (tg.pts.size === 0){
+    tlWrap.classList.remove('drag');
+    tg.wasDrag = tg.moved;
+    if (tg.moved && Math.abs(tg.vx) > 0.25 && performance.now() - tg.lt < 90) inertia(tg.vx);
+    tg.pan = null;
+  }
+}
+tlWrap.addEventListener('pointerup', tlUp);
+tlWrap.addEventListener('pointercancel', tlUp);
+/* 點一下開事件：等瀏覽器的 click 再開，避免手指放開後補發的 click 把剛打開的視窗關掉 */
+tlWrap.addEventListener('click', e => {
+  if (tg.wasDrag){ tg.wasDrag = false; return; }
+  const p = local(e); tapTL(p.x, p.y);
+});
+function inertia(v0){
+  let v = v0, last = performance.now();
+  const step = now => {
+    const dt = Math.min(40, now - last); last = now;
+    tv.off -= v * dt; v *= Math.pow(0.93, dt / 16);
+    const max = tlLast ? tlLast.g.maxOff : 0;
+    if (tv.off <= 0 || tv.off >= max){ tv.off = clamp(tv.off, 0, max); v = 0; }
+    renderTimeline();
+    tg.inert = Math.abs(v) > 0.02 ? requestAnimationFrame(step) : 0;
+  };
+  tg.inert = requestAnimationFrame(step);
+}
+function tapTL(x, y){
+  let best = null, bd = 24 * 24;
+  for (const h of tlHeads){ const d = (h.x - x) ** 2 + (h.y - y) ** 2; if (d < bd){ bd = d; best = h; } }
+  if (best) openSheet('event', { id: best.id });
+}
+tlWrap.addEventListener('wheel', e => {
+  if (e.ctrlKey || e.metaKey){ e.preventDefault(); const p = local(e); setZoom(tv.z * Math.exp(-e.deltaY * 0.01), p.x, focusAt(p.x)); return; }
+  if (tv.z > 1.001 && Math.abs(e.deltaX) > Math.abs(e.deltaY)){ e.preventDefault(); tv.off += e.deltaX; scheduleTL(); }
+}, { passive: false });
+['gesturestart', 'gesturechange', 'gestureend'].forEach(t => tlWrap.addEventListener(t, e => e.preventDefault()));
+
+function renderCards(){
+  const detail = ui.mode === 'detail';
+  cardsEl.hidden = !detail;
+  if (!detail) return;
+  if (!M.events.length){ cardsEl.innerHTML = '<div class="none">事件卡片會依時間順序排在這裡，點一下可以查看或修改</div>'; return; }
+  cardsEl.innerHTML = M.events.map(e => {
+    const sp = summaryParts(e);
+    return `<button class="ecard s${e.s}" data-id="${e._id}"><span class="t1"><i></i><b>${fmtClock(e.p, e.t)}</b><span>${esc(teamName(e.s))}</span><span class="lvl lv${e.r}">${LEVELS[e.r]}</span></span>`
+      + `<span class="t2">${esc(sp.head)}</span>${sp.rest.length ? `<span class="t3">${esc(shortPath(sp.rest))}</span>` : ''}</button>`;
+  }).join('');
+}
+cardsEl.addEventListener('click', ev => { const c = ev.target.closest('[data-id]'); if (c) openSheet('event', { id: +c.dataset.id }); });
+document.querySelectorAll('.tog [data-mode]').forEach(b => b.addEventListener('click', () => {
+  ui.mode = b.dataset.mode; LS.set('corner-log-mode', ui.mode); renderLegend(); renderTimeline(); renderCards();
+  if (ui.mode === 'detail') requestAnimationFrame(() => { cardsEl.scrollLeft = cardsEl.scrollWidth; });
+}));
+$('#lgdBtn').addEventListener('click', () => { ui.legend = !ui.legend; renderLegend(); });
+let tlW = 0;
+new ResizeObserver(() => { const w = Math.round(tlWrap.clientWidth); if (w && w !== tlW){ tlW = w; renderTimeline(); } }).observe(tlWrap);
+phoneMQ.addEventListener && phoneMQ.addEventListener('change', () => renderAll());
+
+/* ================= 10. 統計（分組＋說明） ================= */
+const statsEl = $('#stats');
+const fmtN = v => String(v), fmtP = v => v == null ? '—' : Math.round(v * 100) + '%', fmtF = v => v == null ? '—' : v.toFixed(1);
+const STAT_SECS = [
+  ['推進', [
+    ['n', '推進', '次', '記錄到的推進總次數。', fmtN],
+    ['sr', '推進成功率', '', '推進後成功到達禁區周圍一圈的比例。越高，代表越容易把球送到危險區域。', fmtP],
+    ['nf', '推進頻率', '次／10分', '平均每 10 分鐘推進幾次，看這隊進攻多不多、節奏快不快。', fmtF],
+    ['sf', '成功推進頻率', '次／10分', '平均每 10 分鐘有幾次推進到禁區周圍，同時反映次數和品質。', fmtF]]],
+  ['威脅', [
+    ['th', '造威脅', '次', '可能產生角球或進球的進攻次數。', fmtN],
+    ['tr', '威脅轉化率', '威脅÷成功推進', '球到了禁區周圍之後，有多少比例能造成威脅。越高，代表最後一步越有效。', fmtP],
+    ['tf', '威脅頻率', '次／10分', '平均每 10 分鐘造成幾次威脅。威脅越密集，越可能接連產生角球。', fmtF]]],
+  ['結果', [
+    ['sh', '射門', '次', '路線中出現「打门」「产生射门」或「接直塞球打门」的次數。', fmtN],
+    ['co', '角球', '個', '記錄到的角球，包含不經推進的角球。', fmtN],
+    ['go', '進球', '個', '記錄到的進球，包含不經推進的進球。', fmtN]]],
+  ['綜合', [
+    ['ix', '攻勢指數', '每10分', '每次推進按深入程度給分（失敗0、成功1、威脅2、角球3、進球4），換算成每 10 分鐘。一個數字看整體壓力，越高壓得越緊。', fmtF],
+    ['sg', '解圍後再進攻', '次', '對方解圍後又馬上拿回球權再推進的次數。越多，代表對方越被壓在禁區附近；3 分鐘內 3 次以上會標成圍攻。', fmtN]]]
+];
+function renderStats(){
+  const info = periodInfo(M), wr = winRange(info, ui.win);
+  const A = calc(M, info, 0, wr), B = calc(M, info, 1, wr);
+  const mins = wr.mins;
+  statsEl.innerHTML = `<div class="st-top"><p class="cap">統計</p><span class="sp"></span><button class="linkbtn" data-a="notes">${ui.notes ? '隱藏說明' : '顯示說明'}</button></div>`
+    + `<div class="chips" role="group" aria-label="統計時段">${WINS.map(([k, l]) => `<button class="chip" data-w="${k}" aria-pressed="${k === ui.win}">${l}</button>`).join('')}</div>`
+    + `<div class="st-h"><span class="h">${esc(teamName(0))}</span><span class="m">進攻</span><span class="a">${esc(teamName(1))}</span></div>`
+    + `<div class="secs">${STAT_SECS.map(([title, rows]) => `<div class="sec"><h3 class="cap">${title}</h3>${rows.map(([key, lb, unit, note, f]) => {
+        const a = A[key], b = B[key];
+        const va = a == null ? 0 : a, vb = b == null ? 0 : b, sum = va + vb;
+        const pa = sum > 0 ? va / sum * 100 : 0, pb = sum > 0 ? vb / sum * 100 : 0;
+        return `<div class="srow"><span class="h">${f(a)}</span><span class="lb">${lb}${unit ? `<small>${unit}</small>` : ''}</span><span class="a">${f(b)}</span>`
+          + `<span class="bar"><i class="bh" style="width:${pa.toFixed(1)}%"></i><i class="ba" style="width:${pb.toFixed(1)}%"></i></span>`
+          + (ui.notes ? `<p class="note">${note}</p>` : '') + '</div>';
+      }).join('')}</div>`).join('')}</div>`
+    + `<p class="st-foot">統計時長 ${mins >= 0.05 ? mins.toFixed(1) + ' 分鐘' : '—（計時器還沒開始）'}。頻率都換算成每 10 分鐘，方便不同時長互相比較。</p>`;
+}
+statsEl.addEventListener('click', ev => {
+  const c = ev.target.closest('[data-w]');
+  if (c){ ui.win = c.dataset.w; LS.set('corner-log-win', ui.win); renderStats(); renderTimeline(); return; }
+  if (ev.target.closest('[data-a="notes"]')){ ui.notes = !ui.notes; LS.set('corner-log-notes', ui.notes); renderStats(); }
+});
+
+function fitDock(){
+  const dock = $('#dock'), sb = $('.sb');
+  dock.style.top = phoneMQ.matches ? `${-Math.max(0, sb.offsetTop - 6)}px` : '';
+}
+function renderAll(){ renderHeader(); renderBanner(); renderRec(0); renderRec(1); renderLegend(); renderTimeline(); renderCards(); renderStats(); fitDock(); if (!sheet.hidden && sheetKind === 'list') renderSheet(); }
+addEventListener('resize', fitDock);
+
+/* ================= 11. 彈出視窗 ================= */
+const sheet = $('#sheet'), sheetCard = $('#sheetCard');
+let sheetKind = null, sheetData = {};
+function openSheet(kind, data){ sheetKind = kind; sheetData = data || {}; renderSheet(); sheet.hidden = false; sheetCard.scrollTop = 0; }
+function closeSheet(){ sheet.hidden = true; sheetKind = null; sheetCard.innerHTML = ''; }
+const findEv = id => M.events.find(e => e._id === id);
+function countsEnc(o){ const c = { co: [0, 0], go: [0, 0] }; for (const a of o.ev || []){ const s = a[2] ? 1 : 0; if (a[4] === 3) c.co[s]++; if (a[4] === 4) c.go[s]++; } return c; }
+const matchTitle = o => `${o.h || '主隊'} vs ${o.a || '客隊'}`;
+
+function renderSheet(){
+  let h = '';
+  const d = sheetData;
+  switch (sheetKind){
+    case 'menu':
+      h = `<div class="sh-h"><h3>${esc(matchTitle(M))}</h3><button class="ghost" data-a="close">關閉</button></div>
+        <div class="menu"><button data-a="m-list">事件列表<span>${M.events.length} 筆</span></button><button data-a="m-arch">倉庫<span>${[...allMatches.values()].filter(o => (o.ev && o.ev.length) || o.h || o.a).length} 場</span></button>
+        <button data-a="m-clock">比賽時間<span>${PER[M.tm.p][2]} ${fmtClock(M.tm.p, clockOf(M))}</span></button>
+        ${M.st === 2 ? '<button data-a="reopen">重新設為進行中<span>已結束</span></button>' : '<button data-a="m-end">結束比賽<span>填最終比分與角球</span></button>'}
+        <button data-a="m-new">新比賽<span>目前這場會留在倉庫</span></button></div>`;
+      break;
+    case 'clock': {
+      const p = M.tm.p, c = clockOf(M);
+      h = `<div class="sh-h"><h3>比賽時間</h3><button class="pill dark" data-a="close">完成</button></div>
+        <div class="bigclk"><span>${PER[p][2]}</span><b id="shClk">${fmtClock(p, c)}</b><em>${M.tm.r ? '計時中' : '已暫停'}</em></div>
+        <div class="grid2"><button class="pill dark big" data-a="kick" data-p="1">上半場開球（0:00 開始計時）</button><button class="pill dark big" data-a="kick" data-p="2">下半場開球（45:00 開始計時）</button></div>
+        <div><div class="lbl">目前半場</div><div class="seg">${[1, 2, 3, 4].map(q => `<button data-a="per" data-p="${q}" aria-pressed="${q === p}">${PER[q][2]}</button>`).join('')}</div></div>
+        <div><div class="lbl">微調時間</div><div class="adjrow"><button class="ghost" data-a="nudge" data-d="-60">−1分</button><button class="ghost" data-a="nudge" data-d="-10">−10秒</button>
+          <input id="shIn" class="fi" inputmode="numeric" value="${mmss(c)}" aria-label="比賽時間（分:秒）"><button class="ghost" data-a="nudge" data-d="10">+10秒</button><button class="ghost" data-a="nudge" data-d="60">+1分</button><button class="pill" data-a="setin">套用</button></div>
+          <p class="hint">輸入「分:秒」，例如 63:20；上半場補時可輸入 47:30（會顯示成 45+2:30）。比賽中途才開始看，直接輸入當下的比賽時間再按開始就能同步。</p></div>
+        <div class="grid2"><button class="pill" data-a="kick" data-p="3">加時上半開球（90:00）</button><button class="pill" data-a="kick" data-p="4">加時下半開球（105:00）</button></div>
+        <button class="pill big ${M.tm.r ? '' : 'dark'}" data-a="toggle">${M.tm.r ? '暫停計時（中場休息時記得暫停）' : '開始計時'}</button>`;
+      break;
+    }
+    case 'event': {
+      const e = findEv(d.id); if (!e){ closeSheet(); return; }
+      const ch = e._chain;
+      h = `<div class="sh-h"><h3>${fmtClock(e.p, e.t)} · ${PER[e.p][2]} · ${esc(teamName(e.s))} 進攻</h3><button class="pill dark" data-a="${d.from === 'list' ? 'tolist' : 'close'}">完成</button></div>
+        <div class="meta s${e.s}"><span class="lvl lv${e.r}">${LEVELS[e.r]}</span>${e.fl & 1 ? '<span class="tagx">選到一半就提交</span>' : ''}${e.fl & 2 ? '<span class="tagx">不經推進</span>' : ''}${e.path[0] === SIEGE_I ? '<span class="tagx">解圍後再進攻</span>' : ''}</div>
+        ${ch.length ? `<ol class="pathlist">${ch.map((c, i) => `<li class="${c.custom ? 'cu' : ''}">${i === 0 ? '推進方式：' : ''}${c.custom ? '額外：' : ''}${esc(c.label)}</li>`).join('')}</ol>` : ''}
+        <div><div class="lbl">事件時間</div><div class="adjrow"><button class="ghost" data-a="eadj" data-d="-60">−1分</button><button class="ghost" data-a="eadj" data-d="-10">−10秒</button><button class="ghost" data-a="eadj" data-d="10">+10秒</button><button class="ghost" data-a="eadj" data-d="60">+1分</button></div></div>
+        <div><div class="lbl">備註</div><input class="fi" id="eNote" maxlength="80" value="${esc(e.n)}" placeholder="可不填" autocomplete="off"></div>
+        <div class="row"><button class="${d.confirm ? 'pill danger' : 'ghost warn'}" data-a="edel">${d.confirm ? '確定刪除這個事件' : '刪除事件'}</button></div>`;
+      break;
+    }
+    case 'list': {
+      const groups = {};
+      for (const e of M.events) (groups[e.p] = groups[e.p] || []).push(e);
+      h = `<div class="sh-h"><h3>事件列表 · ${esc(matchTitle(M))}</h3><button class="ghost" data-a="exp1" data-id="${M.id}">匯出</button><button class="pill dark" data-a="close">關閉</button></div>`
+        + (M.events.length ? Object.keys(groups).map(p => `<div class="elist"><h4 class="cap">${PER[p][2]}　${groups[p].length} 筆</h4>${groups[p].map(e => {
+            const sp = summaryParts(e);
+            return `<button class="erow s${e.s}" data-a="open" data-id="${e._id}"><i></i><b>${fmtClock(e.p, e.t)}</b><span class="ep">${esc(teamName(e.s))}：${esc(sp.head)}${sp.rest.length ? `<small>${esc(sp.rest.join(' › '))}</small>` : ''}${e.n ? `<small>備註：${esc(e.n)}</small>` : ''}</span><span class="lvl lv${e.r}">${LEVELS[e.r]}</span></button>`;
+          }).join('')}</div>`).join('') : '<p class="hint">這場還沒有事件。</p>');
+      break;
+    }
+    case 'archive': {
+      const arr = [...allMatches.values()].filter(o => (o.ev && o.ev.length) || o.h || o.a || o.lg).sort((a, b) => (b.u || b.c) - (a.u || a.c));
+      const last = LS.get('corner-log-exported', 0);
+      const since = arr.filter(o => (o.u || 0) > last).length;
+      h = `<div class="sh-h"><h3>倉庫 · ${arr.length} 場</h3><button class="pill dark" data-a="close">關閉</button></div>
+        <div class="row"><button class="pill dark" data-a="expall" ${arr.length ? '' : 'disabled'}>匯出全部</button><button class="pill" data-a="imp">匯入檔案</button><button class="ghost" data-a="paste">貼上文字匯入</button></div>
+        <p class="hint" style="margin:0">資料只存在這台裝置上。${last ? `上次匯出：${new Date(last * 1000).toLocaleString('zh-TW', { hour12: false })}` : '還沒有匯出過'}${since ? `，之後有 ${since} 場新增或修改` : ''}。建議定期匯出備份；匯出檔可以直接傳給 Claude 分析。</p>
+        <div class="mlist">${arr.length ? arr.map(o => {
+          const c = countsEnc(o), cur = o.id === M.id;
+          return `<div class="mrow"><div class="t"><b>${esc(matchTitle(o))}</b><span class="badge${o.st === 1 ? ' live' : ''}">${o.st === 1 ? '進行中' : '已結束'}</span>${cur ? '<span class="badge">目前</span>' : ''}</div>
+            <div class="s">${esc(o.d)}${o.lg ? ' · ' + esc(o.lg) : ''} · 事件 ${(o.ev || []).length} · 角球 ${c.co[0]}–${c.co[1]} · 進球 ${c.go[0]}–${c.go[1]}${o.fs ? ` · 最終比分 ${o.fs[0]}–${o.fs[1]}` : ''}${o.fc ? ` · 最終角球 ${o.fc[0]}–${o.fc[1]}` : ''}</div>
+            <div class="row">${cur ? '' : `<button class="pill" data-a="mopen" data-id="${esc(o.id)}">打開</button>`}<button class="ghost" data-a="exp1" data-id="${esc(o.id)}">匯出</button><button class="${d.del === o.id ? 'pill danger' : 'ghost warn'}" data-a="mdel" data-id="${esc(o.id)}">${d.del === o.id ? '確定刪除' : '刪除'}</button></div></div>`;
+        }).join('') : '<p class="hint">還沒有任何比賽記錄。</p>'}</div>`;
+      break;
+    }
+    case 'export': {
+      const kb = (new Blob([d.text]).size / 1024).toFixed(1);
+      const canShare = !!(navigator.canShare && window.File && (() => { try { return navigator.canShare({ files: [new File(['x'], 'x.json', { type: 'application/json' })] }); } catch(e){ return false; } })());
+      h = `<div class="sh-h"><h3>匯出</h3><button class="pill dark" data-a="${d.back === 'archive' ? 'toarch' : 'close'}">完成</button></div>
+        <p class="hint" style="margin:0">${esc(d.name)}　·　${d.count} 場　·　${kb} KB</p>
+        <div class="grid2">${canShare ? '<button class="pill dark big" data-a="share">分享／儲存到「檔案」</button>' : ''}${isStandalone() ? '' : '<button class="pill big" data-a="dl">下載檔案</button>'}<button class="pill big" data-a="copy">複製文字</button></div>
+        <p class="hint" style="margin:0">檔案是精簡的 JSON，裡面附有欄位說明和整個思維導圖，可以直接傳給 Claude 分析，也可以在另一台裝置的倉庫「匯入」。</p>
+        <textarea class="fi" id="expText" readonly>${esc(d.text)}</textarea>`;
+      break;
+    }
+    case 'paste':
+      h = `<div class="sh-h"><h3>貼上文字匯入</h3><button class="ghost" data-a="toarch">返回</button></div>
+        <textarea class="fi" id="pasteText" placeholder="把匯出的 JSON 文字貼在這裡"></textarea>
+        <div class="row"><button class="pill dark" data-a="dopaste">匯入</button></div>`;
+      break;
+    case 'end': {
+      const c = counts(M);
+      h = `<div class="sh-h"><h3>結束比賽</h3><button class="ghost" data-a="close">取消</button></div>
+        <p class="hint" style="margin:0">填上最終比分和全場角球數（可不填），以後分析時可以拿來和記錄的事件對照。預先填的是目前記錄到的數字。</p>
+        <div><div class="lbl">最終比分</div>${stepper('fs', c.go)}</div>
+        <div><div class="lbl">全場角球</div>${stepper('fc', c.co)}</div>
+        <div class="row"><button class="pill dark big" data-a="doend">結束並保存</button></div>`;
+      break;
+    }
+    case 'new':
+      h = `<div class="sh-h"><h3>開始新比賽？</h3></div><p class="hint" style="margin:0">目前這場（${esc(matchTitle(M))}，${M.events.length} 個事件）已自動保存在倉庫，之後可以再打開。</p>
+        <div class="row"><button class="pill dark big" data-a="donew">開始新比賽</button><button class="pill big" data-a="close">取消</button></div>`;
+      break;
+  }
+  sheetCard.innerHTML = h;
+}
+function stepper(id, v){
+  return `<div class="stepper"><div class="side"><span class="nm" style="color:var(--home)">${esc(teamName(0))}</span><input class="fi" id="${id}0" inputmode="numeric" value="${v[0]}"></div><span class="vs">:</span><div class="side a"><input class="fi" id="${id}1" inputmode="numeric" value="${v[1]}"><span class="nm" style="color:var(--away)">${esc(teamName(1))}</span></div></div>`;
+}
+function parseClock(s){
+  s = String(s).trim().replace('：', ':');
+  const m = s.match(/^(\d{1,3})(?::(\d{1,2}))?$/); if (!m) return null;
+  return (+m[1]) * 60 + (+(m[2] || 0));
+}
+function sheetAction(a, b){
+  const d = sheetData;
+  switch (a){
+    case 'close': closeSheet(); break;
+    case 'tolist': openSheet('list'); break;
+    case 'toarch': openSheet('archive'); break;
+    case 'm-list': openSheet('list'); break;
+    case 'm-arch': openSheet('archive'); break;
+    case 'm-clock': openSheet('clock'); break;
+    case 'm-end': openSheet('end'); break;
+    case 'm-new': if (isEmpty(M)){ closeSheet(); showToast('目前這場還是空的，可以直接開始記錄'); } else openSheet('new'); break;
+    case 'reopen': M.st = 1; touch(); saveNow(); closeSheet(); renderAll(); break;
+    case 'kick': { const p = +b.dataset.p; setPeriod(M, p, PER[p][0], true); touch(); saveNow(); syncWake(); renderAll(); renderSheet(); break; }
+    case 'per': { const p = +b.dataset.p; if (p !== M.tm.p){ const c = clockOf(M); const keep = c >= PER[p][0] && c <= PER[p][1] + 1200; setPeriod(M, p, keep ? c : PER[p][0], false); touch(); saveNow(); renderAll(); } renderSheet(); break; }
+    case 'nudge': setClock(M, clockOf(M) + (+b.dataset.d)); touch(); saveNow(); renderAll(); renderSheet(); break;
+    case 'setin': { const v = parseClock($('#shIn').value); if (v == null){ showToast('時間格式請用 分:秒，例如 63:20'); break; } setClock(M, v); touch(); saveNow(); renderAll(); renderSheet(); break; }
+    case 'toggle': M.tm.r ? pauseClock(M) : startClock(M); touch(); saveNow(); syncWake(); renderAll(); renderSheet(); break;
+    case 'eadj': { const e = findEv(d.id); if (e){ e.t = Math.max(0, e.t + (+b.dataset.d)); sortEvents(M); touch(); saveNow(); renderAll(); renderSheet(); } break; }
+    case 'edel': if (!d.confirm){ d.confirm = true; renderSheet(); } else { removeEvent(d.id); if (d.from === 'list') openSheet('list'); else closeSheet(); showToast('已刪除事件'); } break;
+    case 'open': openSheet('event', { id: +b.dataset.id, from: 'list' }); break;
+    case 'exp1': { const o = b.dataset.id === M.id ? encMatch(M) : allMatches.get(b.dataset.id); if (o) openExport([o], sheetKind === 'archive' ? 'archive' : 'list'); break; }
+    case 'expall': openExport([...allMatches.values()].filter(o => (o.ev && o.ev.length) || o.h || o.a), 'archive'); break;
+    case 'share': doShare(); break;
+    case 'dl': doDownload(); break;
+    case 'copy': doCopy(); break;
+    case 'imp': fileIn.click(); break;
+    case 'paste': openSheet('paste'); break;
+    case 'dopaste': importText($('#pasteText').value); break;
+    case 'mopen': { saveNow(); const o = allMatches.get(b.dataset.id); if (o){ switchMatch(decMatch(o)); closeSheet(); renderAll(); syncWake(); showToast(`已打開：${matchTitle(M)}`); } break; }
+    case 'mdel': {
+      const id = b.dataset.id;
+      if (d.del !== id){ d.del = id; renderSheet(); break; }
+      allMatches.delete(id); Store.del(id);
+      if (id === M.id){ switchMatch(newMatch(M)); renderAll(); }
+      d.del = null; renderSheet(); showToast('已刪除這場比賽');
+      break;
+    }
+    case 'doend': {
+      const num = id => { const v = parseInt($('#' + id).value, 10); return isNaN(v) ? null : Math.max(0, v); };
+      const fs = [num('fs0'), num('fs1')], fc = [num('fc0'), num('fc1')];
+      M.fs = fs[0] != null && fs[1] != null ? fs : null; M.fc = fc[0] != null && fc[1] != null ? fc : null;
+      pauseClock(M); M.pe[M.tm.p] = Math.max(Math.round(clockOf(M)), maxEventT(M, M.tm.p)); M.st = 2; ui.drafts = [null, null];
+      touch(); saveNow(); syncWake(); closeSheet(); renderAll(); showToast('比賽已結束並保存到倉庫');
+      break;
+    }
+    case 'donew': saveNow(); switchMatch(newMatch(M)); closeSheet(); renderAll(); syncWake(); break;
+  }
+}
+sheet.addEventListener('click', ev => {
+  if (ev.target === sheet){ closeSheet(); return; }
+  const b = ev.target.closest('[data-a]'); if (b) sheetAction(b.dataset.a, b);
+});
+sheet.addEventListener('input', ev => {
+  if (ev.target.id === 'eNote' && sheetKind === 'event'){ const e = findEv(sheetData.id); if (e){ e.n = ev.target.value; touch(); save(); } }
+});
+sheet.addEventListener('keydown', ev => { if (ev.key === 'Enter' && ev.target.id === 'shIn'){ ev.preventDefault(); sheetAction('setin'); } });
+document.addEventListener('keydown', ev => { if (ev.key === 'Escape' && !sheet.hidden) closeSheet(); });
+
+/* ================= 12. 匯出與匯入 ================= */
+const fileIn = $('#fileIn');
+const safeName = s => String(s || '').replace(/[\\/:*?"<>|\s]+/g, '').slice(0, 20);
+function openExport(list, back){
+  const today = new Date(); const ds = `${today.getFullYear()}-${pad2(today.getMonth() + 1)}-${pad2(today.getDate())}`;
+  const matches = list.map(o => { const c = Object.assign({}, o); delete c.tm; return c; });
+  const obj = { app: '角球事件記錄', fmt: 1, exported: new Date().toISOString().slice(0, 16), readme: README, tree: TREE_SER, matches };
+  const name = list.length === 1 ? `角球記錄_${list[0].d || ds}_${safeName(list[0].h) || '主隊'}vs${safeName(list[0].a) || '客隊'}.json` : `角球記錄_全部${list.length}場_${ds}.json`;
+  openSheet('export', { text: JSON.stringify(obj), name, count: list.length, back });
+}
+const markExported = () => { LS.set('corner-log-exported', nowSec()); };
+async function doShare(){
+  const d = sheetData;
+  try {
+    const f = new File([d.text], d.name, { type: 'application/json' });
+    await navigator.share({ files: [f], title: d.name });
+    markExported(); showToast('已送出檔案');
+  } catch(e){ if (e && e.name !== 'AbortError') showToast('這裡無法分享檔案，請改用「複製文字」'); }
+}
+function doDownload(){
+  const d = sheetData;
+  try {
+    const url = URL.createObjectURL(new Blob([d.text], { type: 'application/json' }));
+    const a = document.createElement('a'); a.href = url; a.download = d.name; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    markExported(); showToast('已開始下載；如果沒有反應，請改用「複製文字」');
+  } catch(e){ showToast('這裡無法下載，請改用「複製文字」'); }
+}
+function doCopy(){
+  const ta = $('#expText');
+  const fallback = () => { ta.focus(); ta.select(); try { document.execCommand('copy'); markExported(); showToast('已複製'); } catch(e){ showToast('文字已全選，請手動複製'); } };
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(sheetData.text).then(() => { markExported(); showToast('已複製到剪貼簿'); }, fallback);
+    else fallback();
+  } catch(e){ fallback(); }
+}
+fileIn.addEventListener('change', async () => {
+  const f = fileIn.files && fileIn.files[0]; fileIn.value = '';
+  if (!f) return;
+  try { importText(await f.text()); } catch(e){ showToast('讀取檔案失敗'); }
+});
+async function importText(txt){
+  let o;
+  try { o = JSON.parse(String(txt || '').trim()); } catch(e){ showToast('內容不是有效的 JSON'); return; }
+  if (!o || o.fmt !== 1 || !Array.isArray(o.matches)){ showToast('這不是角球事件記錄的匯出檔'); return; }
+  let add = 0, upd = 0, skip = 0;
+  for (const raw of o.matches){
+    if (!raw || !raw.id || !Array.isArray(raw.ev)){ skip++; continue; }
+    const ex = allMatches.get(raw.id);
+    if (ex && (ex.u || 0) > (raw.u || 0)){ skip++; continue; }
+    const m = decMatch(raw);
+    if (ex && ex.tm && raw.st === 1) m.tm = ex.tm;
+    const enc = encMatch(m);
+    allMatches.set(enc.id, enc); await Store.put(enc);
+    ex ? upd++ : add++;
+    if (enc.id === M.id){ M = decMatch(enc); ui.drafts = [null, null]; }
+  }
+  renderAll(); openSheet('archive');
+  showToast(`匯入完成：新增 ${add} 場、更新 ${upd} 場${skip ? `、略過 ${skip} 場（倉庫裡的比較新或格式不符）` : ''}`);
+}
+
+/* ================= 13. 其他互動 ================= */
+const toastEl = $('#toast'), toastMsg = $('#toastMsg'), toastUndo = $('#toastUndo');
+let toastT = 0, undoFn = null;
+function showToast(msg, undo){
+  toastMsg.textContent = msg; undoFn = undo || null; toastUndo.hidden = !undo; toastEl.hidden = false;
+  clearTimeout(toastT); toastT = setTimeout(() => { toastEl.hidden = true; undoFn = null; }, undo ? 6000 : 2600);
+}
+toastUndo.addEventListener('click', () => { const f = undoFn; undoFn = null; toastEl.hidden = true; if (f){ f(); showToast('已復原'); } });
+
+let nameT = 0;
+for (const [id, key] of fields){
+  const el = $('#' + id);
+  el.addEventListener('input', () => {
+    M[key] = el.value; touch(); save();
+    clearTimeout(nameT); nameT = setTimeout(() => { renderRec(0); renderRec(1); renderStats(); renderCards(); }, 200);
+  });
+}
+perBtn.addEventListener('click', () => openSheet('clock'));
+clkEl.addEventListener('click', () => openSheet('clock'));
+runBtn.addEventListener('click', () => { M.tm.r ? pauseClock(M) : startClock(M); touch(); saveNow(); syncWake(); renderHeader(); renderRec(0); renderRec(1); renderTimeline(); renderStats(); });
+$('#listBtn').addEventListener('click', () => openSheet('list'));
+$('#archBtn').addEventListener('click', () => openSheet('archive'));
+$('#menuBtn').addEventListener('click', () => openSheet('menu'));
+$('#banner').addEventListener('click', ev => {
+  const b = ev.target.closest('[data-a]'); if (!b) return;
+  if (b.dataset.a === 'reopen'){ M.st = 1; touch(); saveNow(); renderAll(); }
+  if (b.dataset.a === 'golive'){
+    saveNow();
+    const o = [...allMatches.values()].filter(x => x.st === 1 && x.id !== M.id).sort((a, b2) => (b2.u || 0) - (a.u || 0))[0];
+    if (o){ switchMatch(decMatch(o)); renderAll(); syncWake(); }
+  }
+});
+
+let lastFull = 0;
+setInterval(() => {
+  tickClock();
+  if (sheetKind === 'clock'){ const el = $('#shClk'); if (el) el.textContent = fmtClock(M.tm.p, clockOf(M)); }
+  if (M.tm.r && Date.now() - lastFull > 5000 && !tg.pts.size && !tg.inert){ lastFull = Date.now(); renderTimeline(); renderStats(); }
+}, 250);
+
+/* ================= 14. 啟動 ================= */
+(async function boot(){
+  renderAll();
+  await Store.init();
+  const arr = await Store.all();
+  for (const o of arr) if (o && o.id) allMatches.set(o.id, o);
+  const cur = LS.get('corner-log-current', null);
+  let o = cur && allMatches.get(cur);
+  if (!o) o = [...allMatches.values()].filter(x => x.st === 1).sort((a, b) => (b.u || 0) - (a.u || 0))[0];
+  if (o) M = decMatch(o);
+  renderAll(); syncWake();
+  if (/[?&]cmtest\b/.test(location.search)) window.__cl = { get M(){ return M; }, allMatches, heads: () => tlHeads, tv, encMatch, TREE_SER, walk };
+})();
+})();
+</script>
+<script>
+/* 主畫面 App：離線快取，以及在 Safari 裡提示「加入主畫面」 */
+(() => {
+  const secure = location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+  if ('serviceWorker' in navigator && secure) addEventListener('load', () => { navigator.serviceWorker.register('./sw.js').catch(() => {}); });
+  const hint = document.getElementById('installHint');
+  let dismissed = false;
+  try { dismissed = localStorage.getItem('corner-log-install-hint') === '1'; } catch(e){}
+  const ios = /iP(ad|hone|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  if (secure && ios && navigator.standalone === false && !dismissed) hint.hidden = false;
+  document.getElementById('installClose').onclick = () => { hint.hidden = true; try { localStorage.setItem('corner-log-install-hint', '1'); } catch(e){} };
+})();
+</script>
+</body>
+</html>
